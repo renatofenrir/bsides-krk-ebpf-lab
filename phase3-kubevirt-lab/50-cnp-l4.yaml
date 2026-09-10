@@ -1,0 +1,34 @@
+# PHASE 3 -- DRAFT / UNVALIDATED
+#
+# STEP ONE of the lockdown: plain L4. Only tmp-client and the Gateway may
+# reach the VM, and only on TCP/80. Everything else is dropped.
+#
+# Demo beat: this is the policy an ordinary Kubernetes shop would write. It is
+# correct and it is not enough -- it cannot tell GET /details from GET /secret,
+# because at L4 both are "TCP to port 80". That gap is what 50-cnp-l7.yaml
+# closes, and it is the argument for L7-aware enforcement.
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vm-l4-lockdown
+  namespace: kubevirt-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      kubevirt.io/vm: nginx-vm
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: tmp-client
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+    # The Gateway's Envoy runs as a managed workload with a reserved identity;
+    # without this the external curl through $GATEWAY is dropped too.
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP

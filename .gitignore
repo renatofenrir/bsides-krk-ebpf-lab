@@ -1,0 +1,11 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+
+# Ansible / Kubespray artifacts
+ansible/artifacts/
+*.kubeconfig
+*.retry

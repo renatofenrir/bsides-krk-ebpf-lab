@@ -1,0 +1,42 @@
+# ===========================================================================
+# STATUS: RECONSTRUCTED -- behaviour matches the original talk, YAML does not
+#         necessarily match it byte for byte.
+#
+# The original monitor-network-activity-outside-cluster-cidr-range policy was
+# lost with the deleted cluster. This is rebuilt from its described behaviour:
+# a tcp_connect kprobe that flags connections whose destination falls outside
+# the pod and service CIDRs.
+#
+# CIDRs BELOW ARE CLUSTER-SPECIFIC. They are the Kubespray defaults pinned in
+# ansible/group_vars/all/all.yml. The upstream Kind-based reference lab used
+# 10.244.0.0/16 -- that value is wrong here and would flag nothing.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "monitor-network-activity-outside-cluster-cidr-range"
+spec:
+  kprobes:
+    # tcp_connect fires once per outbound TCP connection attempt, before the
+    # SYN leaves. Observing here rather than at the socket layer means we see
+    # the destination address, which is the whole point of the policy.
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: "sock"
+      selectors:
+        - matchArgs:
+            - index: 0
+              operator: "NotDAddr"
+              values:
+                # Loopback: not interesting, and noisy.
+                - 127.0.0.1
+                # Service CIDR (kube_service_addresses)
+                - 10.233.0.0/18
+                # Pod CIDR (kube_pods_subnet)
+                - 10.233.64.0/18
+          # No matchActions -- this policy only OBSERVES. The killing happens
+          # in 10-kill-network-recon-binaries.yaml. Keeping detection and
+          # mitigation in separate files is what lets the talk show the
+          # "before" and "after" as two distinct beats.

@@ -1,0 +1,119 @@
+# ===========================================================================
+# STATUS: RECONSTRUCTED -- behaviour matches the original talk, YAML does not
+#         necessarily match it byte for byte.
+#
+# Kills nmap / curl / nc the moment they touch the network, at four different
+# kernel hooks so that switching protocol does not evade it:
+#
+#   tcp_connect      outbound TCP        (nmap -sT, curl, nc)
+#   ip_send_skb      any IP datagram out (nmap -sU, DNS, ping payloads)
+#   raw_sendmsg      raw sockets         (nmap -sS SYN scan, hand-rolled pkts)
+#   packet_sendmsg   AF_PACKET           (link-layer injection)
+#
+# ⚠️  READ THIS BEFORE PHASE 3 ⚠️
+# This policy is CLUSTER-WIDE and curl is in the kill list. Phase 3 drives the
+# whole KubeVirt demo with `curl` from a tmp-client pod -- those curls will be
+# SIGKILLed and the L7 policy demo will look broken for the wrong reason.
+# Either delete this policy before Phase 3, or apply the namespaced variant
+# in 11-kill-network-recon-binaries-namespaced.yaml instead. LAB_GUIDE.md
+# calls this out at the transition.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "kill-network-recon-binaries"
+spec:
+  kprobes:
+    # --- 1. Outbound TCP -----------------------------------------------
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: "sock"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill
+
+    # --- 2. Any outbound IP datagram -----------------------------------
+    # ip_send_skb is downstream of tcp_connect, so it also catches UDP scans
+    # and DNS-based recon that never opens a TCP connection at all.
+    - call: "ip_send_skb"
+      syscall: false
+      args:
+        - index: 1
+          type: "skb"
+          label: "datagram"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill
+
+    # --- 3. Raw sockets ------------------------------------------------
+    # This is the one that stops `nmap -sS`. A SYN scan never calls
+    # tcp_connect -- it builds packets itself -- so a policy hooked only at
+    # tcp_connect catches the noisy scan and misses the quiet one.
+    #
+    # ⚠️  raw_sendmsg and packet_sendmsg are static symbols. They are usually
+    # present in kallsyms but are not guaranteed on every kernel build. Verify
+    # BEFORE the talk:
+    #     ssh ubuntu@10.1.1.40 'grep -wE "raw_sendmsg|packet_sendmsg" /proc/kallsyms'
+    # If a symbol is missing, Tetragon rejects the whole TracingPolicy, not
+    # just that hook -- the policy will sit there not working. Check
+    # `kubectl describe tracingpolicy kill-network-recon-binaries`.
+    - call: "raw_sendmsg"
+      syscall: false
+      args:
+        - index: 0
+          type: "sock"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill
+
+    # --- 4. AF_PACKET --------------------------------------------------
+    # packet_sendmsg takes a `struct socket *`, which Tetragon has no typed
+    # representation for -- "nop" means "this argument exists, do not try to
+    # decode it". The selector is on the binary, not the argument, so nothing
+    # is lost.
+    - call: "packet_sendmsg"
+      syscall: false
+      args:
+        - index: 0
+          type: "nop"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill

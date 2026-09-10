@@ -1,0 +1,66 @@
+# PHASE 3 -- DRAFT / UNVALIDATED
+#
+# STEP TWO: the same policy, now HTTP-aware. / and /details are allowed;
+# /secret is not, and the request never reaches nginx.
+#
+# Expected on the client side (matching the original reference lab):
+#   curl http://nginx/         -> nginx welcome page
+#   curl http://nginx/details  -> <h1>VMDetails</h1>...
+#   curl http://nginx/secret   -> HTTP/1.1 403 Forbidden, server: envoy
+#
+# And in `hubble observe`:
+#   kubevirt-demo/tmp-client:48482 -> kubevirt-demo/virt-launcher-nginx-vm-xxxxx:80
+#     http-request DROPPED (HTTP/1.1 GET http://nginx/secret)
+#
+# The 403 comes from Envoy, not from nginx. nginx never logs the request --
+# worth showing on stage by tailing the VM console alongside the curl.
+#
+# Applying this REPLACES the L4 policy's effect on the same endpoint (both
+# select it, and Cilium takes the union of allowances -- so delete
+# vm-l4-lockdown first, or the L4 rule keeps permitting the /secret request
+# that this one is meant to drop).
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: vm-l7-lockdown
+  namespace: kubevirt-demo
+spec:
+  endpointSelector:
+    matchLabels:
+      kubevirt.io/vm: nginx-vm
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            app: tmp-client
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+          rules:
+            http:
+              # ANCHORED ON PURPOSE. Cilium matches `path` as a regex, not as a
+              # literal, so an unanchored "/" matches every path that merely
+              # CONTAINS a slash -- including /secret. The policy would look
+              # correct, apply cleanly, and allow exactly the request it exists
+              # to block. "^/$" and "^/details$" are the honest versions.
+              - method: "GET"
+                path: "^/$"
+              - method: "GET"
+                path: "^/details$"
+    - fromEntities:
+        - ingress
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+          rules:
+            http:
+              # ANCHORED ON PURPOSE. Cilium matches `path` as a regex, not as a
+              # literal, so an unanchored "/" matches every path that merely
+              # CONTAINS a slash -- including /secret. The policy would look
+              # correct, apply cleanly, and allow exactly the request it exists
+              # to block. "^/$" and "^/details$" are the honest versions.
+              - method: "GET"
+                path: "^/$"
+              - method: "GET"
+                path: "^/details$"

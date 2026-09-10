@@ -1,0 +1,41 @@
+# ===========================================================================
+# STATUS: BATTLE-TESTED -- this is the policy as presented at the Heineken
+#         Kraków warm-up talk, reproduced from the original lab notes.
+#
+# Goal: kill tcpdump the moment it tries to create a socket for sniffing,
+# before a single packet is captured.
+#
+# How it works:
+#   1. Hook security_socket_create -- the LSM hook every socket() call passes
+#      through. Args are (family, type, protocol), all ints.
+#   2. Match only the tcpdump binary.
+#   3. SIGKILL.
+#
+# The key idea, and the line worth saying out loud on stage: this is not a
+# firewall rule and not a network policy. Nothing is blocked at the network
+# layer. The kernel observes the behaviour and terminates the process before
+# the action completes.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicy
+metadata:
+  name: "kill-tcpdump"
+spec:
+  kprobes:
+    - call: "security_socket_create"
+      syscall: false
+      args:
+        - index: 0
+          type: int # family
+        - index: 1
+          type: int # type
+        - index: 2
+          type: int # protocol
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/sbin/tcpdump"
+                - "/usr/bin/tcpdump"
+          matchActions:
+            - action: Sigkill

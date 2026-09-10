@@ -1,0 +1,65 @@
+# The attacker workload. nicolaka/netshoot ships nmap, curl, nc, tcpdump and
+# dig already installed, which is exactly the toolkit the Phase 2 policies are
+# written against.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tetragon-demo
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: attacker
+  namespace: tetragon-demo
+  labels:
+    app: attacker
+spec:
+  # Restart policy matters here. Every successful mitigation SIGKILLs a
+  # process; if that process were PID 1 the pod would restart and the demo
+  # would lose its shell mid-sentence. Sleeping as PID 1 and running the
+  # attacks via `kubectl exec` keeps the pod alive across kills.
+  restartPolicy: Always
+  containers:
+    - name: netshoot
+      image: nicolaka/netshoot:latest
+      command: ["sleep", "infinity"]
+      securityContext:
+        capabilities:
+          # NET_RAW and NET_ADMIN so nmap -sS and tcpdump can actually attempt
+          # what the policies are meant to stop. Without these the attacks
+          # fail on permissions and the demo proves nothing -- the audience
+          # sees a denial, but from the container runtime, not from eBPF.
+          add: ["NET_RAW", "NET_ADMIN"]
+  # Pin to a worker so the flows cross a node boundary and show up as
+  # inter-node traffic in Hubble.
+  nodeSelector:
+    kubernetes.io/hostname: k8s-worker-0-bsides-krk-demo
+---
+# A harmless in-cluster target for the "allowed traffic still works" beat.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: victim
+  namespace: tetragon-demo
+  labels:
+    app: victim
+spec:
+  containers:
+    - name: nginx
+      image: nginx:1.27-alpine
+      ports:
+        - containerPort: 80
+  nodeSelector:
+    kubernetes.io/hostname: k8s-worker-1-bsides-krk-demo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: victim
+  namespace: tetragon-demo
+spec:
+  selector:
+    app: victim
+  ports:
+    - port: 80
+      targetPort: 80

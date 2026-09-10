@@ -1,0 +1,16 @@
+# PHASE 3 -- DRAFT / UNVALIDATED
+#
+# The in-cluster client used to prove the policies from inside the mesh, as
+# opposed to the laptop hitting the Gateway from outside.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: tmp-client
+  namespace: kubevirt-demo
+  labels:
+    app: tmp-client
+spec:
+  containers:
+    - name: client
+      image: nicolaka/netshoot:latest
+      command: ["sleep", "infinity"]

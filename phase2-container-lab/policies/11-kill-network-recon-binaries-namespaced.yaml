@@ -1,0 +1,60 @@
+# ===========================================================================
+# STATUS: RECONSTRUCTED, and a DEVIATION from the original talk.
+#
+# Same hooks and same kill list as 10-kill-network-recon-binaries.yaml, but
+# scoped to a single namespace via TracingPolicyNamespaced.
+#
+# Why this exists: the cluster-wide version kills curl everywhere, including
+# the tmp-client pod that drives the entire Phase 3 KubeVirt demo. Apply THIS
+# one instead if you intend to run Phases 2 and 3 back to back without
+# deleting policies in between.
+#
+# Trade-off to be aware of before choosing: the cluster-wide policy is the
+# more impressive demo, because "I ran nmap in a totally unrelated namespace
+# and it died" lands harder than the same thing inside the blast radius you
+# just drew. Use this variant for rehearsal and the wide one on stage, or
+# accept the tamer version and keep the run continuous.
+# ===========================================================================
+apiVersion: cilium.io/v1alpha1
+kind: TracingPolicyNamespaced
+metadata:
+  name: "kill-network-recon-binaries"
+  namespace: tetragon-demo
+spec:
+  kprobes:
+    - call: "tcp_connect"
+      syscall: false
+      args:
+        - index: 0
+          type: "sock"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill
+
+    - call: "ip_send_skb"
+      syscall: false
+      args:
+        - index: 1
+          type: "skb"
+          label: "datagram"
+      selectors:
+        - matchBinaries:
+            - operator: "In"
+              values:
+                - "/usr/bin/nmap"
+                - "/usr/bin/curl"
+                - "/usr/bin/nc"
+                - "/bin/nc"
+                - "/usr/bin/ncat"
+                - "/usr/bin/netcat"
+          matchActions:
+            - action: Sigkill

@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+#
+# Credentials do NOT belong here. Export them instead:
+#   export TF_VAR_pm_user='root@pam'
+#   export TF_VAR_pm_password='...'
+#
+# (The prod repo has a Telegram bot token committed in
+# components/terraform.tfvars. Not repeating that here.)
+
+# ACTION REQUIRED: VMID of your plain Ubuntu template.
+template_vm_id = 9000
+
+ssh_public_key = "ssh-ed25519 AAAA... renato@bifrost"
+
+# Defaults below are already set in variables.tf; override only if needed.
+# proxmox_node = "sleipnir"
+# master_ip    = "10.1.1.40"
+# worker_ips   = ["10.1.1.41", "10.1.1.42"]

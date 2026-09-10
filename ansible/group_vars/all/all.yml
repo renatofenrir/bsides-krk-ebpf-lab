@@ -1,0 +1,48 @@
+# ---------------------------------------------------------------------------
+# Kubespray variables for the BSides lab
+# ---------------------------------------------------------------------------
+
+# --- CNI: none. Cilium is installed afterwards, by hand, on stage. ---------
+#
+# The prod repo lets Kubespray install Cilium via `-e @cilium-extra-vars.yml`.
+# This lab does not, for two reasons:
+#
+#   1. The talk's whole Phase 1 is the `cilium install --set ...` line. Burying
+#      it inside a 20-minute Kubespray run means the audience never sees it.
+#   2. ipam.mode cannot be changed after the fact. Letting Kubespray install
+#      Cilium with its cluster-pool default and then "fixing" it to
+#      ipam.mode=kubernetes does not work -- it needs to be right at install.
+#
+# Consequence: after Kubespray finishes, every node is NotReady and CoreDNS is
+# Pending. That is expected. `cilium install` is what makes them Ready.
+kube_network_plugin: cni
+kube_network_plugin_multus: false
+
+# --- kube-proxy: removed. Cilium replaces it in eBPF. ---------------------
+kube_proxy_remove: true
+
+# --- CIDRs, pinned explicitly ---------------------------------------------
+#
+# These are Kubespray's defaults, but they are written out here because the
+# monitor-network-activity-outside-cluster-cidr-range TracingPolicy in Phase 2
+# hard-codes them. If you change either value, change
+# phase2-container-lab/policies/00-monitor-outside-cluster-cidr.yaml to match
+# or the policy will flag every in-cluster connection as suspicious.
+#
+# NOTE: the upstream reference lab was Kind-based and used 10.244.0.0/16.
+# Those numbers do not apply here.
+kube_pods_subnet: 10.233.64.0/18
+kube_service_addresses: 10.233.0.0/18
+
+kube_version: v1.31.4
+
+# --- DNS ------------------------------------------------------------------
+upstream_dns_servers:
+  - 192.0.2.168
+  - 8.8.8.8
+
+# --- Lab conveniences -----------------------------------------------------
+# Pull the kubeconfig back to inventory/artifacts/ so the operator laptop can
+# drive the cluster without SSHing to the master mid-talk.
+kubeconfig_localhost: true
+kubectl_localhost: true

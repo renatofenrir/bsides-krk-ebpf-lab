@@ -1,0 +1,17 @@
+# PHASE 3 -- DRAFT / UNVALIDATED
+#
+# An ordinary ClusterIP Service in front of the VM. The selector matches the
+# virt-launcher pod's labels; nothing here is KubeVirt-aware.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+  namespace: kubevirt-demo
+spec:
+  selector:
+    kubevirt.io/vm: nginx-vm
+  ports:
+    - name: http
+      port: 80
+      targetPort: 80
+      protocol: TCP

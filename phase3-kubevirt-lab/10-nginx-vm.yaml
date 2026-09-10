@@ -1,0 +1,120 @@
+# ===========================================================================
+# PHASE 3 -- DRAFT / UNVALIDATED
+#
+# An Ubuntu VM running nginx, serving three paths that the CiliumNetworkPolicy
+# demos in 50-cnp-l7.yaml discriminate between:
+#
+#   /          stock nginx welcome page   -> allowed
+#   /details   VM name, IP, locale        -> allowed
+#   /secret    the thing we lock down     -> 403 from Envoy
+#
+# The /details output is shaped to match the original reference lab, which
+# rendered: <h1>VMDetails</h1><p>Name: ...</p><p>IP: ...</p><p>Locale: ...</p>
+# ===========================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubevirt-demo
+---
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: nginx-vm
+  namespace: kubevirt-demo
+  labels:
+    app: nginx
+spec:
+  running: true
+  template:
+    metadata:
+      labels:
+        # These labels land on the virt-launcher POD, which is what
+        # CiliumNetworkPolicy and Tetragon actually select on. The VM is a
+        # workload like any other as far as the datapath is concerned -- that
+        # is the point of the whole section.
+        app: nginx
+        kubevirt.io/vm: nginx-vm
+    spec:
+      domain:
+        cpu:
+          cores: 1
+        resources:
+          requests:
+            memory: 1536M
+        devices:
+          disks:
+            - name: containerdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            # masquerade puts the guest behind NAT inside the virt-launcher
+            # pod's netns. The guest sees 10.0.2.2; the cluster sees the pod
+            # IP. This is what makes the VM addressable by a normal Service
+            # and selectable by a normal network policy.
+            #
+            # It is also why socketLB.hostNamespaceOnly=true is set on Cilium
+            # back in Phase 1: without it, socket-level load balancing rewrites
+            # connections inside that netns and this binding misbehaves.
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: containerdisk
+          containerDisk:
+            image: quay.io/containerdisks/ubuntu:24.04
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |-
+              #cloud-config
+              package_update: true
+              packages:
+                - nginx
+              write_files:
+                - path: /etc/nginx/sites-available/default
+                  content: |
+                    server {
+                      listen 80 default_server;
+                      root /var/www/html;
+                      index index.nginx-debian.html;
+
+                      location / {
+                        try_files $uri $uri/ =404;
+                      }
+
+                      # Served without an extension, so nginx would otherwise
+                      # hand them out as application/octet-stream and curl
+                      # would print nothing useful on stage.
+                      location = /details {
+                        default_type text/html;
+                        try_files /details =404;
+                      }
+                      location = /secret {
+                        default_type text/html;
+                        try_files /secret =404;
+                      }
+                    }
+                - path: /usr/local/bin/render-details.sh
+                  permissions: "0755"
+                  content: |
+                    #!/bin/bash
+                    # Rendered at boot rather than baked in, so the IP shown is
+                    # the real one the guest ended up with.
+                    IP=$(hostname -I | awk '{print $1}')
+                    {
+                      printf '<h1>VMDetails</h1>'
+                      printf '<p>Name: %s</p>' "$(hostname)"
+                      printf '<p>IP: %s </p>' "$IP"
+                      printf '<p>Locale: %s</p>' "$(locale | tr '\n' ' ')"
+                    } > /var/www/html/details
+                - path: /var/www/html/secret
+                  content: |
+                    <h1>TOP SECRET</h1><p>flag{ebpf-runtime-security}</p>
+              runcmd:
+                - [ bash, /usr/local/bin/render-details.sh ]
+                - [ systemctl, restart, nginx ]
+                - [ systemctl, enable, nginx ]
