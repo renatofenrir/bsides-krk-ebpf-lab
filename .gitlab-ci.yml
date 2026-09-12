@@ -214,7 +214,6 @@ bootstrap-crds:
   <<: *clean_terraform
   script:
     - docker run --rm
-        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
         -u="0:0"
@@ -223,7 +222,6 @@ bootstrap-crds:
         -w="/terraform"
         $TF_IMG
         sh -c '
-          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
           terraform init -upgrade -reconfigure
             -backend-config=access_key=$AWS_ACCESS_KEY_ID
             -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
@@ -283,7 +281,6 @@ plan-components:
   <<: *clean_terraform
   script:
     - docker run --rm
-        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
         -u="0:0"
@@ -292,7 +289,6 @@ plan-components:
         -w="/terraform"
         $TF_IMG
         sh -c '
-          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
           terraform init -upgrade -reconfigure
             -backend-config=access_key=$AWS_ACCESS_KEY_ID
             -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
@@ -307,7 +303,6 @@ apply-components:
   <<: *clean_terraform
   script:
     - docker run --rm
-        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
         -u="0:0"
@@ -316,7 +311,6 @@ apply-components:
         -w="/terraform"
         $TF_IMG
         sh -c '
-          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
           terraform init -upgrade -reconfigure
             -backend-config=access_key=$AWS_ACCESS_KEY_ID
             -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&

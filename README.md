@@ -33,7 +33,8 @@ key, inventory, hostname or IP with it. The lab's state prefix is
 Makefile                make up / make lab / make down
 .gitlab-ci.yml          staged, every job manual, mirrors prod's shape
 vms/                    Terraform: 2 Proxmox VMs
-components/             Terraform: add-ons, from bifrost-k8s-extensions-module
+components/             Terraform: add-ons
+components/modules/     vendored copies of the extension modules
 inventory/              Kubespray inventory + group-vars
 install-master-deps.yml puts helm/cilium/hubble/tetra/virtctl on the master
 scripts/                the bits the Makefile shells out to
@@ -60,10 +61,16 @@ one, change the other.
 
 ## Add-ons
 
-Same modules as prod, from `bifrost-k8s-extensions-module`, pinned to one
-commit rather than tracking `main`: **gateway-api-crds**, **metrics-server**,
-**local-path**, **coredns-config**. `kube-prometheus-stack` is wired up but off
-(`enable_monitoring = true` to enable).
+**Vendored** into `components/modules/`, copied out of
+`bifrost-k8s-extensions-module` at commit `bc4a1f4`: **gateway-api-crds**,
+**metrics-server**, **local-path**, **coredns-config**, plus
+**kube-prometheus-stack** wired up but off (`enable_monitoring = true`).
+
+Vendored rather than referenced so this repo depends on no other repo. A
+`terraform init` here needs no GitLab reachability and no `CI_JOB_TOKEN`, and
+prod moving its module repo forward between rehearsal and talk cannot change
+what the lab installs. The trade is that upstream fixes do not arrive on their
+own — `components/main.tf` documents the re-sync.
 
 Deliberately absent, each for a reason documented in `components/main.tf`:
 MetalLB (conflicts with Cilium `l2announcements`), ingress-nginx, ArgoCD,
@@ -79,6 +86,16 @@ descheduler, cert-manager and Traefik.
   and `kill-network-recon-binaries`.
 - 🚧 **Draft** — everything under `phase3-kubevirt-lab/`. Never run. Rehearse
   before showing.
+
+## Dependencies
+
+The only things this repo reaches for are the Proxmox API, your MinIO state
+backend, the container images (`quay.io/kubespray`, `renatofenrir/terraform`),
+and `registry.terraform.io` for Terraform providers on first init. Both
+`.terraform.lock.hcl` files are committed — init once before you travel and the
+plugin cache serves them after that.
+
+No other repo of yours is required, at build time or run time.
 
 ## Credentials
 

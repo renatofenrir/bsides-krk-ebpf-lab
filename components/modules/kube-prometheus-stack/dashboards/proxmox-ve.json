@@ -1,0 +1,1100 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "description": "Proxmox VE monitoring via prometheus-pve-exporter. Node/VM/LXC/Storage metrics -- hardware sensors, SMART, and ZFS panels are a separate future phase pending additional exporters.",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "panels": [],
+      "title": "📊 Cluster Overview",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": 0 } ] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "count(pve_up{id=~\"node/.+\"} == 1)", "legendFormat": "", "refId": "A" }
+      ],
+      "title": "Nodes Online",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": 0 } ] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "count(pve_guest_info{type=\"qemu\"})", "legendFormat": "", "refId": "A" }
+      ],
+      "title": "Total VMs",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "purple", "value": 0 } ] },
+          "unit": "none"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "count(pve_guest_info{type=\"lxc\"})", "legendFormat": "", "refId": "A" }
+      ],
+      "title": "Total LXC",
+      "type": "stat"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "avg(pve_cpu_usage_ratio{id=~\"node/.+\"}) * 100", "legendFormat": "", "refId": "A" }
+      ],
+      "title": "Cluster CPU",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "max": 100,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": 0 },
+              { "color": "yellow", "value": 70 },
+              { "color": "red", "value": 90 }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 1 },
+      "id": 5,
+      "options": {
+        "minVizHeight": 75,
+        "minVizWidth": 75,
+        "orientation": "auto",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showThresholdLabels": false,
+        "showThresholdMarkers": true,
+        "sizing": "auto"
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        {
+          "expr": "sum(pve_memory_usage_bytes{id=~\"node/.+\"}) / sum(pve_memory_size_bytes{id=~\"node/.+\"}) * 100",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Cluster Memory",
+      "type": "gauge"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": 0 } ] },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 1 },
+      "id": 6,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "sum(pve_memory_size_bytes{id=~\"node/.+\"})", "legendFormat": "", "refId": "A" }
+      ],
+      "title": "Total Memory",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 },
+      "id": 101,
+      "panels": [],
+      "title": "🖥️ Node: $node",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": 0 } ] },
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "id": 10,
+      "options": {
+        "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "pve_cpu_usage_ratio{id=~\"node/($node)\"}", "legendFormat": "{{id}}", "refId": "A" }
+      ],
+      "title": "CPU Load",
+      "type": "timeseries"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "barWidthFactor": 0.6,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+            "insertNulls": false,
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": { "type": "linear" },
+            "showPoints": "never",
+            "showValues": false,
+            "spanNulls": false,
+            "stacking": { "group": "A", "mode": "none" },
+            "thresholdsStyle": { "mode": "off" }
+          },
+          "mappings": [],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": 0 } ] },
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "id": 11,
+      "options": {
+        "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+        "tooltip": { "hideZeros": false, "mode": "multi", "sort": "desc" }
+      },
+      "pluginVersion": "12.3.9",
+      "targets": [
+        { "expr": "pve_memory_usage_bytes{id=~\"node/($node)\"}", "legendFormat": "{{id}} Used", "refId": "A" },
+        { "expr": "pve_memory_size_bytes{id=~\"node/($node)\"}", "legendFormat": "{{id}} Total", "refId": "B" }
+      ],
+      "title": "Memory Usage",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 },
+      "id": 200,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "custom": {
+                "align": "auto",
+                "cellOptions": { "type": "auto" },
+                "inspect": false
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "0": { "color": "red", "index": 1, "text": "Stopped" },
+                    "1": { "color": "green", "index": 0, "text": "Running" }
+                  },
+                  "type": "value"
+                }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Status" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } },
+                  { "id": "custom.width", "value": 100 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "CPU" },
+                "properties": [
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "custom.cellOptions", "value": { "type": "auto" } },
+                  { "id": "custom.width", "value": 80 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Memory" },
+                "properties": [ { "id": "unit", "value": "bytes" } ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Uptime" },
+                "properties": [ { "id": "unit", "value": "s" } ]
+              }
+            ]
+          },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 21 },
+          "id": 201,
+          "options": {
+            "cellHeight": "sm",
+            "footer": { "countRows": false, "fields": "", "reducer": [ "sum" ], "show": false },
+            "showHeader": true,
+            "sortBy": [ { "desc": true, "displayName": "Status" } ]
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_up",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "status"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_cpu_usage_ratio",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "cpu"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_memory_usage_bytes",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "mem"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_uptime_seconds",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "uptime"
+            }
+          ],
+          "title": "Virtual Machines",
+          "transformations": [
+            {
+              "id": "seriesToColumns",
+              "options": { "byField": "id" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
+                  "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true, "__name__ 4": true,
+                  "instance": true, "instance 1": true, "instance 2": true, "instance 3": true, "instance 4": true,
+                  "job": true, "job 1": true, "job 2": true, "job 3": true, "job 4": true,
+                  "type 1": true, "type 2": true, "type 3": true, "type 4": true,
+                  "template 1": true, "template 2": true, "template 3": true, "template 4": true,
+                  "tags 1": true, "tags 2": true, "tags 3": true, "tags 4": true,
+                  "node 1": true, "node 2": true, "node 3": true, "node 4": true,
+                  "name 1": true, "name 2": true, "name 3": true, "name 4": true,
+                  "container": true, "container 1": true, "container 2": true, "container 3": true, "container 4": true,
+                  "endpoint": true, "endpoint 1": true, "endpoint 2": true, "endpoint 3": true, "endpoint 4": true,
+                  "namespace": true, "namespace 1": true, "namespace 2": true, "namespace 3": true, "namespace 4": true,
+                  "pod": true, "pod 1": true, "pod 2": true, "pod 3": true, "pod 4": true,
+                  "service": true, "service 1": true, "service 2": true, "service 3": true, "service 4": true
+                },
+                "indexByName": {
+                  "id": 0,
+                  "name": 1,
+                  "Value #status": 2,
+                  "Value #cpu": 3,
+                  "Value #mem": 4,
+                  "Value #uptime": 5,
+                  "node": 6
+                },
+                "renameByName": {
+                  "Value #cpu": "CPU",
+                  "Value #mem": "Memory",
+                  "Value #status": "Status",
+                  "Value #uptime": "Uptime",
+                  "id": "ID",
+                  "name": "Name",
+                  "node": "Node"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "max": 1,
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 73 },
+          "id": 204,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_cpu_usage_ratio",
+              "legendFormat": "{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "VM CPU Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 73 },
+          "id": 202,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() rate(pve_network_receive_bytes_total[5m])",
+              "legendFormat": "{{name}} In",
+              "refId": "A"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() rate(pve_network_transmit_bytes_total[5m])",
+              "legendFormat": "{{name}} Out",
+              "refId": "B"
+            }
+          ],
+          "title": "VM Network I/O",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 73 },
+          "id": 205,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() pve_memory_usage_bytes",
+              "legendFormat": "{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "VM Memory Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 73 },
+          "id": 203,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() rate(pve_disk_read_bytes_total[5m])",
+              "legendFormat": "{{name}} Read",
+              "refId": "A"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"qemu\"} * on(id) group_left() rate(pve_disk_written_bytes_total[5m])",
+              "legendFormat": "{{name}} Write",
+              "refId": "B"
+            }
+          ],
+          "title": "VM Disk I/O",
+          "type": "timeseries"
+        }
+      ],
+      "title": "🖥️ Virtual Machines",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 15 },
+      "id": 210,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "custom": {
+                "align": "auto",
+                "cellOptions": { "type": "auto" },
+                "inspect": false
+              },
+              "mappings": [
+                {
+                  "options": {
+                    "0": { "color": "red", "index": 1, "text": "Stopped" },
+                    "1": { "color": "green", "index": 0, "text": "Running" }
+                  },
+                  "type": "value"
+                }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 1 } ] }
+            },
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "Status" },
+                "properties": [
+                  { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } },
+                  { "id": "custom.width", "value": 100 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "CPU" },
+                "properties": [
+                  { "id": "unit", "value": "percentunit" },
+                  { "id": "custom.cellOptions", "value": { "type": "auto" } },
+                  { "id": "custom.width", "value": 80 }
+                ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Memory" },
+                "properties": [ { "id": "unit", "value": "bytes" } ]
+              },
+              {
+                "matcher": { "id": "byName", "options": "Uptime" },
+                "properties": [ { "id": "unit", "value": "s" } ]
+              }
+            ]
+          },
+          "gridPos": { "h": 10, "w": 24, "x": 0, "y": 22 },
+          "id": 211,
+          "options": {
+            "cellHeight": "sm",
+            "footer": { "countRows": false, "fields": "", "reducer": [ "sum" ], "show": false },
+            "showHeader": true,
+            "sortBy": [ { "desc": true, "displayName": "Status" } ]
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_up",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "status"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_cpu_usage_ratio",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "cpu"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_memory_usage_bytes",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "mem"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_uptime_seconds",
+              "format": "table",
+              "instant": true,
+              "legendFormat": "",
+              "refId": "uptime"
+            }
+          ],
+          "title": "LXC Containers",
+          "transformations": [
+            {
+              "id": "seriesToColumns",
+              "options": { "byField": "id" }
+            },
+            {
+              "id": "organize",
+              "options": {
+                "excludeByName": {
+                  "Time": true, "Time 1": true, "Time 2": true, "Time 3": true, "Time 4": true,
+                  "__name__": true, "__name__ 1": true, "__name__ 2": true, "__name__ 3": true, "__name__ 4": true,
+                  "instance": true, "instance 1": true, "instance 2": true, "instance 3": true, "instance 4": true,
+                  "job": true, "job 1": true, "job 2": true, "job 3": true, "job 4": true,
+                  "type 1": true, "type 2": true, "type 3": true, "type 4": true,
+                  "template 1": true, "template 2": true, "template 3": true, "template 4": true,
+                  "tags 1": true, "tags 2": true, "tags 3": true, "tags 4": true,
+                  "node 1": true, "node 2": true, "node 3": true, "node 4": true,
+                  "name 1": true, "name 2": true, "name 3": true, "name 4": true,
+                  "container": true, "container 1": true, "container 2": true, "container 3": true, "container 4": true,
+                  "endpoint": true, "endpoint 1": true, "endpoint 2": true, "endpoint 3": true, "endpoint 4": true,
+                  "namespace": true, "namespace 1": true, "namespace 2": true, "namespace 3": true, "namespace 4": true,
+                  "pod": true, "pod 1": true, "pod 2": true, "pod 3": true, "pod 4": true,
+                  "service": true, "service 1": true, "service 2": true, "service 3": true, "service 4": true
+                },
+                "indexByName": {
+                  "id": 0,
+                  "name": 1,
+                  "Value #status": 2,
+                  "Value #cpu": 3,
+                  "Value #mem": 4,
+                  "Value #uptime": 5,
+                  "node": 6
+                },
+                "renameByName": {
+                  "Value #cpu": "CPU",
+                  "Value #mem": "Memory",
+                  "Value #status": "Status",
+                  "Value #uptime": "Uptime",
+                  "id": "ID",
+                  "name": "Name",
+                  "node": "Node"
+                }
+              }
+            }
+          ],
+          "type": "table"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "max": 1,
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "percentunit"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 74 },
+          "id": 214,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_cpu_usage_ratio",
+              "legendFormat": "{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "LXC CPU Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 74 },
+          "id": 212,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() rate(pve_network_receive_bytes_total[5m])",
+              "legendFormat": "{{name}} In",
+              "refId": "A"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() rate(pve_network_transmit_bytes_total[5m])",
+              "legendFormat": "{{name}} Out",
+              "refId": "B"
+            }
+          ],
+          "title": "LXC Network I/O",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "bytes"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 74 },
+          "id": 215,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() pve_memory_usage_bytes",
+              "legendFormat": "{{name}}",
+              "refId": "A"
+            }
+          ],
+          "title": "LXC Memory Usage",
+          "type": "timeseries"
+        },
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "palette-classic" },
+              "custom": {
+                "axisCenteredZero": false,
+                "axisColorMode": "text",
+                "axisLabel": "",
+                "axisPlacement": "auto",
+                "barAlignment": 0,
+                "drawStyle": "line",
+                "fillOpacity": 20,
+                "gradientMode": "none",
+                "hideFrom": { "legend": false, "tooltip": false, "viz": false },
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "pointSize": 5,
+                "scaleDistribution": { "type": "linear" },
+                "showPoints": "never",
+                "spanNulls": false,
+                "stacking": { "group": "A", "mode": "none" },
+                "thresholdsStyle": { "mode": "off" }
+              },
+              "mappings": [],
+              "thresholds": { "mode": "absolute", "steps": [ { "color": "green" } ] },
+              "unit": "Bps"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 74 },
+          "id": 213,
+          "options": {
+            "legend": { "calcs": [ "mean", "max" ], "displayMode": "table", "placement": "bottom", "showLegend": true },
+            "tooltip": { "mode": "multi", "sort": "desc" }
+          },
+          "targets": [
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() rate(pve_disk_read_bytes_total[5m])",
+              "legendFormat": "{{name}} Read",
+              "refId": "A"
+            },
+            {
+              "expr": "pve_guest_info{node=~\"$node\", type=\"lxc\"} * on(id) group_left() rate(pve_disk_written_bytes_total[5m])",
+              "legendFormat": "{{name}} Write",
+              "refId": "B"
+            }
+          ],
+          "title": "LXC Disk I/O",
+          "type": "timeseries"
+        }
+      ],
+      "title": "📦 LXC Containers",
+      "type": "row"
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 16 },
+      "id": 220,
+      "panels": [
+        {
+          "datasource": "Prometheus",
+          "fieldConfig": {
+            "defaults": {
+              "color": { "mode": "thresholds" },
+              "mappings": [],
+              "max": 100,
+              "min": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green" },
+                  { "color": "yellow", "value": 70 },
+                  { "color": "red", "value": 85 }
+                ]
+              },
+              "unit": "percent"
+            },
+            "overrides": []
+          },
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+          "id": 221,
+          "options": {
+            "displayMode": "lcd",
+            "minVizHeight": 10,
+            "minVizWidth": 0,
+            "orientation": "horizontal",
+            "reduceOptions": { "calcs": [ "lastNotNull" ], "fields": "", "values": false },
+            "showUnfilled": true,
+            "valueMode": "color"
+          },
+          "targets": [
+            {
+              "expr": "pve_storage_info{node=~\"$node\"} * on(id) group_left() (pve_disk_usage_bytes / pve_disk_size_bytes * 100)",
+              "legendFormat": "{{storage}} ({{plugintype}})",
+              "refId": "A"
+            }
+          ],
+          "title": "Storage Usage",
+          "type": "bargauge"
+        }
+      ],
+      "title": "💾 Storage",
+      "type": "row"
+    }
+  ],
+  "preload": false,
+  "refresh": "30s",
+  "schemaVersion": 42,
+  "tags": [ "proxmox", "pve", "virtualization", "pve-exporter" ],
+  "templating": {
+    "list": [
+      {
+        "allValue": ".*",
+        "current": { "text": "All", "value": "$__all" },
+        "datasource": "Prometheus",
+        "definition": "label_values(pve_node_info, name)",
+        "includeAll": true,
+        "label": "Node",
+        "multi": true,
+        "name": "node",
+        "options": [],
+        "query": {
+          "query": "label_values(pve_node_info, name)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "",
+  "title": "Proxmox VE - pve-exporter",
+  "uid": "bifrost-proxmox-ve",
+  "version": 1
+}

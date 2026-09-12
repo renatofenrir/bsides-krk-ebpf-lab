@@ -1,0 +1,125 @@
+{
+  "title": "Host Energy Cost Estimate (PLN)",
+  "uid": "host-energy-cost-pln",
+  "tags": ["bifrost", "energy"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**CPU package power only (Intel/AMD RAPL via node-exporter).** This does not capture full-system draw (PSU efficiency, disks, GPU, fans). Treat these as directional estimates until a smart-plug reading is wired in for whole-system accuracy. Price used: **${pln_per_kwh} PLN/kWh** (edit the panel queries below to change it without a redeploy)."
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Current Power Draw",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt",
+          "decimals": 1
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(node_rapl_package_joules_total[5m]))",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Estimated Cost - Last 24h",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyPLN",
+          "decimals": 2
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(increase(node_rapl_package_joules_total[24h])) / 3600000 * ${pln_per_kwh}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Estimated Monthly Cost",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 12, "y": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyPLN",
+          "decimals": 2
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "avg_over_time(sum(rate(node_rapl_package_joules_total[5m]))[6h:5m]) * 730 / 1000 * ${pln_per_kwh}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Price Used",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 6, "w": 6, "x": 18, "y": 3 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyPLN",
+          "decimals": 2
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "${pln_per_kwh}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Power Draw Over Time",
+      "datasource": "Prometheus",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 9 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "watt"
+        }
+      },
+      "targets": [
+        {
+          "datasource": "Prometheus",
+          "expr": "sum(rate(node_rapl_package_joules_total[5m]))",
+          "legendFormat": "package power",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

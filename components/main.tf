@@ -1,10 +1,11 @@
 # ===========================================================================
 # Lab add-on stack
 #
-# Same pattern as the prod bootstrapper's components/: every add-on is a module
-# sourced from bifrost-k8s-extensions-module. Same modules, same interfaces --
-# only the selection and the values differ, because a two-node disposable demo
-# cluster wants a very different set from a 13-node production cluster.
+# Same pattern as the prod bootstrapper's components/, and the same modules --
+# but VENDORED into ./modules/ rather than fetched from a shared repo, so this
+# lab has no dependency on any other repo of ours. Same interfaces; only the
+# selection and the values differ, because a two-node disposable demo cluster
+# wants a very different set from a 13-node production cluster.
 #
 # WHAT PROD INSTALLS AND THIS DELIBERATELY DOES NOT, and why:
 #
@@ -34,24 +35,35 @@
 #   traefik              No certificates, no second gateway implementation.
 # ===========================================================================
 
-# --- Module pin -----------------------------------------------------------
+# --- Vendored modules -----------------------------------------------------
 #
-# Every source below is pinned to ONE commit of bifrost-k8s-extensions-module,
-# not to main like prod.
+# Every module below lives in components/modules/, copied out of
+# bifrost-k8s-extensions-module at commit bc4a1f4 on 2026-09-12.
 #
-# Prod tracks main because it is continuously reconciled and a drifting module
-# gets noticed within a day. This lab is applied twice a year, minutes before a
-# talk, where a module that moved underneath it fails at exactly the wrong
-# moment.
+# They are VENDORED, not referenced, so this repo has zero dependency on any
+# other repo. Cloning this directory is enough to build the cluster: no
+# reachability to the homelab GitLab, no CI_JOB_TOKEN, no module fetch at
+# `terraform init`. That matters most in the two places it would hurt -- a
+# venue network that cannot reach home, and prod's module repo moving forward
+# between rehearsal and talk.
 #
-# Terraform requires module.source to be a literal -- no variables, no locals,
-# no interpolation -- so the ref is repeated on every module. To bump them all
-# together, and then REHEARSE:
+# TO BE PRECISE ABOUT "OFFLINE": modules are local, but PROVIDERS are still
+# pulled from registry.terraform.io on the first `terraform init`. Commit the
+# generated .terraform.lock.hcl (it is, for both stacks) and init once before
+# you travel; after that the plugin cache serves them. For a genuinely
+# air-gapped run you would need a provider mirror, which this repo does not
+# set up.
 #
-#   sed -i 's/?ref=[0-9a-f]\{40\}/?ref=<new-sha>/g' components/main.tf
+# The cost is that upstream fixes do not arrive on their own. To re-sync one:
 #
-# Pinned: bc4a1f4 ("fix(gpu-operator): tolerate the inference taint")
-
+#   cp -r ../../bifrost-k8s-extensions-module/<name> components/modules/<name>
+#   cd components && terraform init && terraform plan     # then REHEARSE
+#
+# Local edits are fine and expected -- these are the lab's copies now. If you
+# change one, note it here so a future re-sync does not silently revert it.
+#
+#   (no local edits yet)
+#
 # --- Gateway API CRDs ------------------------------------------------------
 #
 # REQUIRED, and required EARLY. Cilium is installed with gatewayAPI.enabled=true,
@@ -64,13 +76,13 @@
 # does not stop the lab. That is also why this replaced the hand-rolled
 # `kubectl apply -f <github url>` the install script used to do.
 module "gateway_api_crds" {
-  source = "git::https://gitlab.example.com/playground/bifrost-k8s-extensions-module.git//gateway-api-crds?ref=bc4a1f45947b6415a28d07e11376551d3a2daae6"
+  source = "./modules/gateway-api-crds"
 }
 
 # --- metrics-server --------------------------------------------------------
 # `kubectl top` during the KubeVirt section, to show what a VM actually costs.
 module "metrics_server" {
-  source = "git::https://gitlab.example.com/playground/bifrost-k8s-extensions-module.git//metrics-server?ref=bc4a1f45947b6415a28d07e11376551d3a2daae6"
+  source = "./modules/metrics-server"
 }
 
 # --- local-path storage ----------------------------------------------------
@@ -84,7 +96,7 @@ module "metrics_server" {
 # requires a node_label_key, and kubernetes.io/os is the one label guaranteed
 # to be on all of them.
 module "local_path" {
-  source = "git::https://gitlab.example.com/playground/bifrost-k8s-extensions-module.git//local-path?ref=bc4a1f45947b6415a28d07e11376551d3a2daae6"
+  source = "./modules/local-path"
 
   storage_class_name = var.storage_class_name
   default_path       = var.local_path_dir
@@ -99,7 +111,7 @@ module "local_path" {
 # Forwards the example.com zone at the internal resolver, so anything on the lab
 # cluster resolves homelab names the same way prod workloads do.
 module "coredns_config" {
-  source = "git::https://gitlab.example.com/playground/bifrost-k8s-extensions-module.git//coredns-config?ref=bc4a1f45947b6415a28d07e11376551d3a2daae6"
+  source = "./modules/coredns-config"
 
   upstream_dns    = var.upstream_dns
   internal_domain = var.internal_domain
@@ -110,7 +122,7 @@ module "coredns_config" {
 # --- Monitoring (optional, off by default) ---------------------------------
 # See the note on var.enable_monitoring before switching this on.
 module "kube_prometheus_stack" {
-  source = "git::https://gitlab.example.com/playground/bifrost-k8s-extensions-module.git//kube-prometheus-stack?ref=bc4a1f45947b6415a28d07e11376551d3a2daae6"
+  source = "./modules/kube-prometheus-stack"
   count  = var.enable_monitoring ? 1 : 0
 
   grafana_hostname            = "grafana.bsides-krk-demo.example.com"

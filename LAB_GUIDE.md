@@ -239,9 +239,10 @@ ssh ubuntu@10.1.1.40 ip -br addr
 
 `make components` then applies the rest of the add-on stack — metrics-server,
 local-path as the default StorageClass, and the CoreDNS forward for the
-`example.com` zone. Same modules prod uses, pinned to one commit rather than
-tracking `main`, because a module that moves underneath this lab fails minutes
-before a talk.
+`example.com` zone. The same modules prod uses, but **vendored** into
+`components/modules/` rather than fetched: this repo depends on no other repo,
+so neither a venue network that cannot reach home nor prod moving its module
+repo forward can change what the lab installs.
 
 ### 1.5 — Pre-flight checklist
 
