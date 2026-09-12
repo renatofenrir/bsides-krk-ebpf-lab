@@ -54,21 +54,27 @@ Proxmox side, confirmed **before** you start:
 
 - [ ] A plain Ubuntu template exists (the standard one, **not** the NVIDIA-baked
       one — this lab has no GPU nodes). Note its VMID.
-- [ ] `10.1.1.40`, `.41`, `.42` are free. Prod holds `.50–.52` (masters),
+- [ ] `10.1.1.40` and `.41` are free. Prod holds `.50–.52` (masters),
       `.60–.64` (workers), `.90–.93` (GPU).
 - [ ] `10.1.1.240–249` are free and **outside the DHCP scope** — that is the
       LoadBalancer pool.
 - [ ] Nested virtualisation is on, for Phase 3:
       `cat /sys/module/kvm_intel/parameters/nested` → `Y`
-- [ ] The `local-lvm` thin pool has room for 3 × 80 GB. Prod notes had
-      `sleipnir`'s pool at 77% — check before adding 240 GB.
+- [ ] The `local-lvm` thin pool has room for 2 × 80 GB. Prod notes had
+      `sleipnir`'s pool at 77% — check before adding 160 GB.
 
 ```bash
 export TF_VAR_pm_user='root@pam'
-export TF_VAR_pm_password='...'          # never put this in tfvars
-cp terraform/terraform.tfvars.example terraform/terraform.tfvars
-$EDITOR terraform/terraform.tfvars        # set template_vm_id + ssh_public_key
+export TF_VAR_pm_password='...'          # never put these in tfvars
+export MINIO_ACCESS_TOKEN='...'          # Terraform state backend
+export MINIO_SECRET_KEY='...'
+cp vms/terraform.tfvars.example vms/terraform.tfvars
+$EDITOR vms/terraform.tfvars              # set template_vm_id + ssh_public_key
 ```
+
+Everything runs in containers — the same Kubespray and Terraform images the
+prod pipeline uses — so the laptop needs only `docker`, `ansible`, `ssh`,
+`kubectl` and `make`.
 
 > **Isolation note.** This repo shares nothing with
 > `k8s-playground-bootstrapper`: different state file, different inventory,
@@ -80,28 +86,54 @@ $EDITOR terraform/terraform.tfvars        # set template_vm_id + ssh_public_key
 
 ## Phase 1 — Reprovision the cluster
 
+The whole phase is one command:
+
+```bash
+make up      # vms → cluster → untaint → kubeconfig → crds → cilium → lb → components
+```
+
+Each step below is also its own target, which is what you want when something
+goes wrong mid-build — `make` picks up where it stopped rather than starting
+over. `make help` lists them all.
+
 ### 1.1 — Clone the VMs
 
 ```bash
-./scripts/00-provision-vms.sh
+make plan    # read-only, safe to run any time
+make vms
 ```
 
 Expected plan:
 
 ```
-Plan: 3 to add, 0 to change, 0 to destroy.
+Plan: 2 to add, 0 to change, 0 to destroy.
 ```
 
 Anything with a destroy in it, or any hostname containing `bifrost-prod`, means
-you are pointed at the wrong thing. The script pauses and makes you type
-`apply` for exactly this reason.
+the wrong state key got loaded. Stop — this repo writes to `bsides-krk-lab/`,
+never `bifrost-prod/`.
+
+`make vms` also waits for SSH and for cloud-init to settle, so the next step
+does not start against a half-booted guest.
 
 ### 1.2 — Bootstrap Kubernetes (no CNI, no kube-proxy)
 
 ```bash
-./scripts/10-bootstrap-kubespray.sh
-export KUBECONFIG=$PWD/ansible/artifacts/lab.kubeconfig
+make cluster     # runs install-master-deps.yml, then Kubespray cluster.yml
+make untaint     # control plane becomes schedulable
+make kubeconfig
+export KUBECONFIG=$HOME/.kube/bsides-lab.conf
 ```
+
+`make cluster` first puts helm, the Cilium CLI, hubble, tetra and virtctl on
+the control plane, so the entire talk can be driven from one SSH session on
+`10.1.1.40` with no tooling on the presenting laptop. On a conference network,
+the fewer things that must work on your machine, the fewer ways the demo dies.
+
+**`make untaint` is not optional.** Kubespray taints the control plane
+`NoSchedule`. On a two-node cluster that leaves exactly one schedulable node,
+every Hubble flow becomes node-local, and the part of the demo that shows
+traffic crossing a node boundary silently stops being true.
 
 Takes 20–30 minutes. When it finishes:
 
@@ -110,7 +142,6 @@ $ kubectl get nodes
 NAME                           STATUS     ROLES           AGE   VERSION
 k8s-master-0-bsides-krk-demo   NotReady   control-plane   2m    v1.31.4
 k8s-worker-0-bsides-krk-demo   NotReady   <none>          1m    v1.31.4
-k8s-worker-1-bsides-krk-demo   NotReady   <none>          1m    v1.31.4
 ```
 
 **`NotReady` is correct here.** There is no CNI yet. CoreDNS will be `Pending`
@@ -118,16 +149,26 @@ for the same reason. This is deliberate: installing Cilium by hand is Phase 1's
 payoff shot, and `ipam.mode` cannot be changed after an install, so it has to
 be right the first time.
 
-### 1.3 — Install Cilium
+### 1.3 — Gateway API CRDs, then Cilium
 
 ```bash
-./scripts/20-install-cilium.sh
+make crds      # MUST come first
+make cilium
 ```
 
-The script installs the Gateway API CRDs first — `gatewayAPI.enabled=true`
-makes the Cilium operator watch resources whose CRDs must already exist, and
-getting the order wrong produces a CrashLoopBackOff that reads like a Cilium
-bug and is not one. Then:
+**Order matters and the failure is misleading.** `gatewayAPI.enabled=true`
+makes the Cilium operator watch Gateway and HTTPRoute at startup. If those CRDs
+are not there yet it goes into CrashLoopBackOff with a missing-CRD error that
+reads like a Cilium bug and is not one.
+
+`make crds` is a targeted apply of just `module.gateway_api_crds` against the
+components stack — the same trick prod's `bootstrap-crds` stage uses. The rest
+of the add-ons wait for `make components`, because with no CNI yet they would
+only sit `Pending`. The module vendors the Gateway API manifests rather than
+fetching them from GitHub at apply time, so a venue network that cannot reach
+`raw.githubusercontent.com` does not stop the build.
+
+`make cilium` runs, from the control plane:
 
 ```bash
 cilium install --version 1.18.1 \
@@ -176,13 +217,13 @@ $ kubectl get nodes
 NAME                           STATUS   ROLES           AGE   VERSION
 k8s-master-0-bsides-krk-demo   Ready    control-plane   8m    v1.31.4
 k8s-worker-0-bsides-krk-demo   Ready    <none>          7m    v1.31.4
-k8s-worker-1-bsides-krk-demo   Ready    <none>          7m    v1.31.4
 ```
 
-### 1.4 — LoadBalancer IPs and L2 announcement
+### 1.4 — LoadBalancer IPs, L2 announcement, add-ons
 
 ```bash
-./scripts/25-cilium-lb-ipam.sh
+make lb
+make components
 ```
 
 This replaces MetalLB. **The two cannot coexist** — both would ARP for the same
@@ -196,19 +237,23 @@ and `^eth[0-9]+$`, and Ubuntu cloud images on virtio usually present `ens18`:
 ssh ubuntu@10.1.1.40 ip -br addr
 ```
 
+`make components` then applies the rest of the add-on stack — metrics-server,
+local-path as the default StorageClass, and the CoreDNS forward for the
+`example.com` zone. Same modules prod uses, pinned to one commit rather than
+tracking `main`, because a module that moves underneath this lab fails minutes
+before a talk.
+
 ### 1.5 — Pre-flight checklist
 
 Run this the night before and again in the speaker room:
 
 ```bash
-cilium status --wait
-kubectl get nodes
-kubectl -n kube-system get pods -l k8s-app=cilium
-ssh ubuntu@10.1.1.40 'grep -wE "raw_sendmsg|packet_sendmsg" /proc/kallsyms'
+make preflight
 ```
 
-That last one matters more than it looks — see the Phase 2 note on static
-symbols.
+which checks Cilium, the nodes, the static kprobe symbols on both hosts, and
+nested virtualisation for Phase 3. The kprobe check matters more than it looks
+— see the Phase 2 note on static symbols.
 
 ---
 
@@ -217,7 +262,7 @@ symbols.
 ### 2.1 — Install Tetragon
 
 ```bash
-./scripts/30-install-tetragon.sh
+make tetragon
 ```
 
 Tetragon has never been part of your add-on stack — it is not in
@@ -226,29 +271,31 @@ Tetragon has never been part of your add-on stack — it is not in
 ### 2.2 — Deploy the attacker
 
 ```bash
-kubectl apply -f phase2-container-lab/attack/netshoot.yaml
+make lab        # installs Tetragon too, if you skipped the step above
 kubectl -n tetragon-demo get pods -o wide
 ```
 
 `nicolaka/netshoot` ships nmap, curl, nc, tcpdump and dig — exactly the toolkit
 the policies are written against. The pod sleeps as PID 1 and attacks run via
 `kubectl exec`, so a SIGKILL never takes the pod down and you never lose your
-shell mid-sentence. The attacker is pinned to worker-0 and the victim to
-worker-1, so flows cross a node boundary and show up as inter-node traffic in
-Hubble.
+shell mid-sentence. The attacker is pinned to the worker and the victim to the
+(untainted) control plane, so flows cross a node boundary and show up as
+inter-node traffic in Hubble. On a two-node cluster those two hostnames are the
+whole topology — if `make untaint` did not run, the victim sits `Pending` and
+this is where you find out.
 
 ### 2.3 — Detection
 
 **Terminal 2** — leave this streaming for the whole demo:
 
 ```bash
-kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
+make events     # kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
 ```
 
 **Terminal 1:**
 
 ```bash
-kubectl apply -f phase2-container-lab/policies/00-monitor-outside-cluster-cidr.yaml
+make detect
 ```
 
 ⚠️ **RECONSTRUCTED.** The CIDRs in it — `10.233.0.0/18` (services) and
@@ -290,8 +337,7 @@ correct behaviour.
 ### 2.4 — Mitigation
 
 ```bash
-kubectl apply -f phase2-container-lab/policies/10-kill-network-recon-binaries.yaml
-kubectl apply -f phase2-container-lab/policies/20-kill-tcpdump.yaml
+make mitigate
 ```
 
 Re-run the same attacks:
@@ -375,7 +421,7 @@ Pick one:
 
 ```bash
 # Option A — drop the wide policy before Phase 3 (recommended on stage)
-kubectl delete tracingpolicy kill-network-recon-binaries
+make unmitigate        # `make kubevirt` does this for you
 
 # Option B — use the namespaced variant from the start of Phase 2 instead
 kubectl apply -f phase2-container-lab/policies/11-kill-network-recon-binaries-namespaced.yaml
@@ -388,7 +434,7 @@ phases continuously. Decide during rehearsal, not on stage.
 ### 3.1 — Install KubeVirt
 
 ```bash
-./scripts/40-install-kubevirt.sh
+make kubevirt          # installs KubeVirt, the VM, Service, Gateway and client
 ```
 
 Takes several minutes. The script checks for `vmx`/`svm` inside a guest and, if
@@ -535,9 +581,20 @@ Be honest about this list if asked:
 ## Teardown
 
 ```bash
-kubectl delete ns kubevirt-demo tetragon-demo --ignore-not-found
-cd terraform && terraform destroy      # 3 VMs, local state, nothing shared
+make down
 ```
+
+Prompts once, tears down the add-on stack best-effort, then destroys both VMs.
+Prod is in a different repo with a different state key and is not touched.
+
+Narrower options when you want them:
+
+| | |
+|---|---|
+| `make reset` | Kubespray `reset.yml` — wipe Kubernetes, keep the VMs |
+| `make destroy-components` | add-ons only |
+| `make destroy-vms` | the two VMs only |
+| `make clean` | local Terraform caches and the lab kubeconfig |
 
 ---
 
@@ -579,7 +636,7 @@ setup, each with a different cause:
 
 | | Original (warm-up talk) | This lab |
 |---|---|---|
-| Cluster | Deleted test cluster | `bsides-krk-demo`, 1 master + 2 workers, 10.1.1.40–42 |
+| Cluster | Deleted test cluster | `bsides-krk-demo`, 2 nodes (untainted master + worker), 10.1.1.40–41 |
 | Reference lab base | Kind | Proxmox + Kubespray |
 | Pod CIDR | `10.244.0.0/16` | `10.233.64.0/18` |
 | Service CIDR | Kind default | `10.233.0.0/18` |

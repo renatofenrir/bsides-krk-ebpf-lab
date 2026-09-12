@@ -46,3 +46,22 @@ upstream_dns_servers:
 # drive the cluster without SSHing to the master mid-talk.
 kubeconfig_localhost: true
 kubectl_localhost: true
+
+# --- Two-node specifics ---------------------------------------------------
+#
+# One control plane, one worker, and the control plane also carries workloads.
+# Kubespray still taints it NoSchedule at the end of cluster.yml; the untaint
+# is a separate explicit step (`make untaint`) rather than a var, so it is
+# visible in the run rather than buried in a role.
+#
+# supplementary_addresses_in_ssl_keys puts the node IP in the apiserver cert
+# so a kubeconfig pointed at 10.1.1.40:6443 (rather than the ClusterIP) does
+# not fail TLS verification. With kube-proxy removed, the node IP is the only
+# address that works before Cilium is up.
+supplementary_addresses_in_ssl_keys:
+  - 10.1.1.40
+
+# A single etcd member. Kubespray warns about even-numbered/no-quorum etcd
+# clusters; for a lab that is rebuilt before every talk, one member is the
+# right trade and the warning is expected.
+etcd_deployment_type: host

@@ -74,7 +74,7 @@ variable "gateway_ip" {
 variable "master_ip" {
   description = <<-EOT
     Control-plane IP. 10.1.1.40 matches the previous BSides demo cluster.
-    ACTION REQUIRED: confirm .40-.42 are free before applying. Prod holds
+    ACTION REQUIRED: confirm .40-.41 are free before applying. Prod holds
     .50-.52 (masters), .60-.64 (workers) and .90-.93 (GPU).
   EOT
   type        = string
@@ -82,7 +82,15 @@ variable "master_ip" {
 }
 
 variable "worker_ips" {
-  description = "Worker IPs, in order."
+  description = <<-EOT
+    Worker IPs, in order. ONE worker by default -- the control plane is
+    untainted and carries workloads too, which keeps the cluster at two VMs
+    while still giving Hubble cross-node flows to draw.
+
+    Adding an entry here provisions another worker; remember to add it to
+    inventory/inventory.ini as well, then use `make scale` (Kubespray
+    scale.yml) rather than a full cluster.yml re-run.
+  EOT
   type        = list(string)
-  default     = ["10.1.1.41", "10.1.1.42"]
+  default     = ["10.1.1.41"]
 }

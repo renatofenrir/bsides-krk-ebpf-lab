@@ -15,4 +15,4 @@ ssh_public_key = "ssh-ed25519 AAAA... renato@bifrost"
 # Defaults below are already set in variables.tf; override only if needed.
 # proxmox_node = "sleipnir"
 # master_ip    = "10.1.1.40"
-# worker_ips   = ["10.1.1.41", "10.1.1.42"]
+# worker_ips   = ["10.1.1.41"]

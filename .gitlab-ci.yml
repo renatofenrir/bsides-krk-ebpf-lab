@@ -1,0 +1,359 @@
+# ===========================================================================
+# BSides Kraków eBPF lab pipeline
+#
+# Mirrors the prod bootstrapper's shape -- staged, every job `when: manual`,
+# Terraform in renatofenrir/terraform:v7, Kubespray in its own image, MinIO as
+# the state backend -- with a different state prefix and a much shorter stage
+# list, because this cluster has two nodes and no GPUs, storage or GitOps.
+#
+# Every job is manual ON PURPOSE. Nothing about this repo should ever run
+# because someone pushed a commit.
+#
+# The Makefile does the same thing from a laptop and is the better tool during
+# the talk itself. This exists so a rebuild is reproducible off a clean runner.
+# ===========================================================================
+
+stages:
+  - plan-vms
+  - apply-vms
+  - bootstrap-cluster
+  - fetch-kubeconfig
+  - bootstrap-crds
+  - install-cilium
+  - plan-components
+  - apply-components
+  - destroy
+
+variables:
+  KUBESPRAY_IMG: quay.io/kubespray/kubespray:v2.31.0
+  TF_IMG: renatofenrir/terraform:v7
+  MASTER_IP: "10.1.1.40"
+  CONTEXT: "bsides-krk-demo"
+  CILIUM_VERSION: "1.18.1"
+
+.vm_vars: &vm_vars
+  TF_VAR_PM_USER: $TF_VAR_PM_USER
+  TF_VAR_PM_PASSWORD: $TF_VAR_PM_PASSWORD
+  TF_VAR_TEMPLATE_VM_ID: $TF_VAR_TEMPLATE_VM_ID
+  TF_VAR_SSH_PUBLIC_KEY: $TF_VAR_SSH_PUBLIC_KEY
+
+.ansible_vars: &ansible_vars
+  ANSIBLE_HOST_KEY_CHECKING: "False"
+  ANSIBLE_CONFIG: "$PWD/ansible.cfg"
+  ANSIBLE_BECOME: "ansible_user=ubuntu ansible_become=yes"
+
+# Terraform in the container runs as root and leaves the checkout root-owned,
+# which breaks the next job's `git clean`. Same fix as prod.
+.fix_permissions: &fix_permissions
+  after_script:
+    - docker run --rm -u="0:0" -v $PWD:/workspace -w="/workspace" alpine
+        sh -c 'chown -R 1002:1002 . 2>/dev/null || true'
+
+.clean_terraform: &clean_terraform
+  before_script:
+    - docker run --rm -u="0:0" -v $PWD:/workspace -w="/workspace" alpine
+        sh -c 'rm -rf vms/.terraform components/.terraform 2>/dev/null || true'
+
+# ──────────────────────────────────────────────
+# Stage 1: Plan VMs
+# ──────────────────────────────────────────────
+plan-vms:
+  tags: [terraform]
+  stage: plan-vms
+  when: manual
+  variables:
+    <<: *vm_vars
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/vms:/terraform
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform plan
+            -var=pm_user=$TF_VAR_PM_USER
+            -var=pm_password=$TF_VAR_PM_PASSWORD
+            -var=template_vm_id=$TF_VAR_TEMPLATE_VM_ID
+            -var="ssh_public_key=$TF_VAR_SSH_PUBLIC_KEY"
+        '
+  <<: *fix_permissions
+
+# ──────────────────────────────────────────────
+# Stage 2: Apply VMs
+#
+# Expect "Plan: 2 to add". Anything with a destroy in it, or any hostname
+# containing bifrost-prod, means the wrong state key got loaded -- stop.
+# ──────────────────────────────────────────────
+apply-vms:
+  tags: [terraform]
+  stage: apply-vms
+  when: manual
+  variables:
+    <<: *vm_vars
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/vms:/terraform
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform apply -auto-approve
+            -var=pm_user=$TF_VAR_PM_USER
+            -var=pm_password=$TF_VAR_PM_PASSWORD
+            -var=template_vm_id=$TF_VAR_TEMPLATE_VM_ID
+            -var="ssh_public_key=$TF_VAR_SSH_PUBLIC_KEY"
+        '
+  <<: *fix_permissions
+
+# ──────────────────────────────────────────────
+# Stage 3: Bootstrap the cluster
+#
+# CNI-less and kube-proxy-less. Nodes come out NotReady and CoreDNS Pending;
+# install-cilium is what makes them Ready. Those values live in
+# inventory/group-vars/all/all.yml, not in -e flags, so the Makefile and this
+# pipeline cannot drift apart.
+# ──────────────────────────────────────────────
+bootstrap-cluster:
+  tags: [terraform]
+  stage: bootstrap-cluster
+  when: manual
+  variables:
+    <<: *ansible_vars
+  script:
+    - echo "[INFO] Waiting for SSH on both nodes.."
+    - ansible -i inventory/inventory.ini all
+        -m wait_for_connection -a "timeout=300 sleep=5 delay=10"
+        -e "$ANSIBLE_BECOME"
+
+    - echo "[INFO] Waiting for cloud-init.."
+    - ansible -i inventory/inventory.ini all
+        -m shell -a "cloud-init status --wait"
+        -e "$ANSIBLE_BECOME"
+
+    - echo "[INFO] Installing lab tooling on the control plane.."
+    - ansible-playbook -i inventory/inventory.ini
+        -l kube_control_plane
+        --user=ubuntu
+        -e 'ansible_python_interpreter=/usr/bin/python3'
+        install-master-deps.yml
+
+    - echo "[INFO] Running Kubespray cluster.yml.."
+    - docker run --rm
+        -v $PWD/inventory/inventory.ini:/kubespray/inventory/inventory.ini:ro
+        -v $PWD/inventory/group-vars:/kubespray/inventory/group_vars:ro
+        --mount type=bind,source="${HOME}"/.ssh/id_rsa,dst=/root/.ssh/id_rsa,readonly
+        $KUBESPRAY_IMG
+        ansible-playbook -i inventory/inventory.ini
+          -e ansible_user=ubuntu -e ansible_become=yes
+          -e host_key_checking=false -e kube_owner=root
+          --private-key /root/.ssh/id_rsa
+          cluster.yml
+
+    - echo "[INFO] Creating kubeconfig on the master.."
+    - ansible -i inventory/inventory.ini kube_control_plane
+        -m shell -a "mkdir -p /home/ubuntu/.kube &&
+          cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config &&
+          chown -R ubuntu:ubuntu /home/ubuntu/.kube"
+        -e "$ANSIBLE_BECOME"
+
+    # Two nodes, and one of them is the control plane. Without this the lab
+    # has exactly one schedulable node and every Hubble flow is node-local.
+    - echo "[INFO] Untainting the control plane.."
+    - ansible -i inventory/inventory.ini kube_control_plane
+        -m shell -a "kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true"
+        -e "$ANSIBLE_BECOME"
+
+# ──────────────────────────────────────────────
+# Stage 4: Fetch kubeconfig to the runner
+# ──────────────────────────────────────────────
+fetch-kubeconfig:
+  tags: [terraform]
+  stage: fetch-kubeconfig
+  when: manual
+  script:
+    - mkdir -p $HOME/.kube
+    - ssh -o StrictHostKeyChecking=no ubuntu@$MASTER_IP
+        "sudo cat /etc/kubernetes/admin.conf" > $HOME/.kube/config
+    # kube-proxy is gone, so the ClusterIP is unreachable until Cilium
+    # programs it. Point at the node IP instead.
+    - >-
+      sed -i "s#server: https://127.0.0.1:6443#server: https://$MASTER_IP:6443#" $HOME/.kube/config
+    # Renamed so a components apply can never silently attach to a prod context.
+    - kubectl config rename-context kubernetes-admin@cluster.local $CONTEXT
+    - kubectl get nodes
+
+# ──────────────────────────────────────────────
+# Stage 5: Bootstrap CRDs
+#
+# Gateway API CRDs, and nothing else, applied before Cilium.
+#
+# Prod has a stage with this name for a different reason -- its modules CONSUME
+# CRDs that the kubectl provider resolves live at plan time. Here the reason is
+# ordering against Cilium: gatewayAPI.enabled=true makes the operator watch
+# Gateway/HTTPRoute at startup, and a missing CRD puts it in CrashLoopBackOff.
+#
+# The rest of the stack has to wait for apply-components: with no CNI yet,
+# metrics-server and local-path would only sit Pending.
+# ──────────────────────────────────────────────
+bootstrap-crds:
+  tags: [terraform]
+  stage: bootstrap-crds
+  when: manual
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/components:/terraform
+        -v $HOME/.kube:/root/.kube:ro
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform apply -auto-approve -target=module.gateway_api_crds
+        '
+  <<: *fix_permissions
+
+# ──────────────────────────────────────────────
+# Stage 6: Install Cilium
+#
+# Run from the control plane, which already has the CLI from
+# install-master-deps.yml. See LAB_GUIDE.md §1.3 for why the last four flags
+# are here and not in the original runbook.
+# ──────────────────────────────────────────────
+install-cilium:
+  tags: [terraform]
+  stage: install-cilium
+  when: manual
+  variables:
+    <<: *ansible_vars
+  script:
+    - ansible -i inventory/inventory.ini kube_control_plane
+        -m shell -a "cilium install --version $CILIUM_VERSION
+          --set ipam.mode=kubernetes
+          --set kubeProxyReplacement=true
+          --set l2announcements.enabled=true
+          --set gatewayAPI.enabled=true
+          --set hubble.relay.enabled=true
+          --set hubble.ui.enabled=true
+          --set socketLB.hostNamespaceOnly=true
+          --set k8sServiceHost=$MASTER_IP
+          --set k8sServicePort=6443
+          --set k8sClientRateLimit.qps=50
+          --set k8sClientRateLimit.burst=200"
+        -e "$ANSIBLE_BECOME"
+
+    - echo "[INFO] Waiting for Cilium.."
+    - ansible -i inventory/inventory.ini kube_control_plane
+        -m shell -a "cilium status --wait"
+        -e "$ANSIBLE_BECOME"
+
+    - echo "[INFO] LoadBalancer IP pool and L2 announcement.."
+    - ./scripts/25-cilium-lb-ipam.sh
+
+    - kubectl get nodes -o wide
+
+# ──────────────────────────────────────────────
+# Stage 7/8: Components
+#
+# Everything except the Gateway API CRDs, which stage 5 already applied. The
+# targeted apply there means this run sees them as up to date and moves on.
+# ──────────────────────────────────────────────
+plan-components:
+  tags: [terraform]
+  stage: plan-components
+  when: manual
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/components:/terraform
+        -v $HOME/.kube:/root/.kube:ro
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform plan
+        '
+  <<: *fix_permissions
+
+apply-components:
+  tags: [terraform]
+  stage: apply-components
+  when: manual
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "CI_JOB_TOKEN=$CI_JOB_TOKEN"
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/components:/terraform
+        -v $HOME/.kube:/root/.kube:ro
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          git config --global url."https://gitlab-ci-token:$CI_JOB_TOKEN@gitlab.example.com/".insteadOf "https://gitlab.example.com/" &&
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform apply -auto-approve --parallelism=3
+        '
+  <<: *fix_permissions
+
+# ──────────────────────────────────────────────
+# Stage 9: Destroy
+#
+# Destroys the VMs, which takes the cluster with them. The components state is
+# left to reconcile on the next apply -- tearing down helm releases on a
+# cluster that is about to be deleted only adds ways for the job to hang.
+# ──────────────────────────────────────────────
+destroy:
+  tags: [terraform]
+  stage: destroy
+  when: manual
+  variables:
+    <<: *vm_vars
+  <<: *clean_terraform
+  script:
+    - docker run --rm
+        --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
+        --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        -u="0:0"
+        -v $PWD/vms:/terraform
+        -w="/terraform"
+        $TF_IMG
+        sh -c '
+          terraform init -upgrade -reconfigure
+            -backend-config=access_key=$AWS_ACCESS_KEY_ID
+            -backend-config=secret_key=$AWS_SECRET_ACCESS_KEY &&
+          terraform destroy -auto-approve
+            -var=pm_user=$TF_VAR_PM_USER
+            -var=pm_password=$TF_VAR_PM_PASSWORD
+            -var=template_vm_id=$TF_VAR_TEMPLATE_VM_ID
+            -var="ssh_public_key=$TF_VAR_SSH_PUBLIC_KEY"
+        '
+  <<: *fix_permissions

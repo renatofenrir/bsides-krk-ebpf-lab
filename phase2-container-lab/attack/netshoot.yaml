@@ -30,8 +30,9 @@ spec:
           # fail on permissions and the demo proves nothing -- the audience
           # sees a denial, but from the container runtime, not from eBPF.
           add: ["NET_RAW", "NET_ADMIN"]
-  # Pin to a worker so the flows cross a node boundary and show up as
-  # inter-node traffic in Hubble.
+  # Attacker on the worker, victim on the (untainted) control plane, so every
+  # flow between them crosses a node boundary and Hubble has something to draw.
+  # On a two-node cluster these two hostnames are the whole topology.
   nodeSelector:
     kubernetes.io/hostname: k8s-worker-0-bsides-krk-demo
 ---
@@ -50,7 +51,7 @@ spec:
       ports:
         - containerPort: 80
   nodeSelector:
-    kubernetes.io/hostname: k8s-worker-1-bsides-krk-demo
+    kubernetes.io/hostname: k8s-master-0-bsides-krk-demo
 ---
 apiVersion: v1
 kind: Service

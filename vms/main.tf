@@ -1,15 +1,21 @@
 # ---------------------------------------------------------------------------
 # BSides Kraków eBPF lab -- disposable cluster
 # ---------------------------------------------------------------------------
-# 1 control-plane + 2 workers, named *-bsides-krk-demo, on 10.1.1.40-42.
+# TWO nodes, named *-bsides-krk-demo, on 10.1.1.40-41:
+#
+#   k8s-master-0  10.1.1.40  control plane, UNTAINTED so it also runs workloads
+#   k8s-worker-0  10.1.1.41  worker
 #
 # This is deliberately NOT the prod topology. Nothing here shares a Terraform
 # state key, an inventory file, or an IP with bifrost-prod-v4. Destroying this
 # cluster is a normal thing to do; destroying prod is not.
 #
-# Two workers rather than one so Hubble can show pod-to-pod traffic crossing a
-# node boundary -- on a single-node cluster every flow is local and the demo
-# loses the part that makes eBPF datapath observability interesting.
+# Why the control plane is untainted rather than adding a third VM: the demo
+# needs pod-to-pod traffic that CROSSES A NODE BOUNDARY, or every Hubble flow
+# is node-local and the datapath observability story falls flat. Two schedulable
+# nodes is the smallest cluster that still gives that. The untaint is a
+# post-bootstrap step, not a Terraform one -- see the Makefile's `untaint`
+# target and the bootstrap-cluster CI stage.
 # ---------------------------------------------------------------------------
 
 locals {

@@ -1,0 +1,85 @@
+---
+# Turns the control-plane node into the demo workstation.
+#
+# Prod's equivalent installs Helm + the ArgoCD CLI. This lab needs a different
+# set: everything the talk is driven with, so the whole demo can be run from
+# one SSH session on 10.1.1.40 with no tooling on the laptop at all. That
+# matters on a conference network -- the fewer things that have to work on the
+# presenting machine, the fewer ways the demo breaks.
+- name: Install lab tooling on the control plane
+  hosts: kube_control_plane
+  become: true
+
+  vars:
+    cilium_cli_version: "v0.18.3"
+    hubble_cli_version: "v1.17.3"
+    tetra_cli_version: "v1.4.0"
+    arch: amd64
+
+  tasks:
+    - name: Install Helm
+      shell: |
+        set -o pipefail
+        curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      args:
+        executable: /bin/bash
+        creates: /usr/local/bin/helm
+
+    - name: Install the Cilium CLI
+      unarchive:
+        src: "https://github.com/cilium/cilium-cli/releases/download/{{ cilium_cli_version }}/cilium-linux-{{ arch }}.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        creates: /usr/local/bin/cilium
+        mode: "0755"
+
+    - name: Install the Hubble CLI
+      unarchive:
+        src: "https://github.com/cilium/hubble/releases/download/{{ hubble_cli_version }}/hubble-linux-{{ arch }}.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        creates: /usr/local/bin/hubble
+        mode: "0755"
+
+    - name: Install the Tetragon CLI
+      unarchive:
+        src: "https://github.com/cilium/tetragon/releases/download/{{ tetra_cli_version }}/tetra-linux-{{ arch }}.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        creates: /usr/local/bin/tetra
+        mode: "0755"
+
+    - name: Install virtctl (KubeVirt, Phase 3)
+      get_url:
+        url: "https://github.com/kubevirt/kubevirt/releases/latest/download/virtctl-linux-{{ arch }}"
+        dest: /usr/local/bin/virtctl
+        mode: "0755"
+
+    - name: Configure shell conveniences for the ubuntu user
+      blockinfile:
+        path: /home/ubuntu/.bashrc
+        owner: ubuntu
+        group: ubuntu
+        create: true
+        marker: "# {mark} bsides lab"
+        block: |
+          export KUBECONFIG=$HOME/.kube/config
+          alias k=kubectl
+          alias kgp='kubectl get pods -A -o wide'
+          # The two commands the talk lives in -- long enough to fat-finger on
+          # stage, so they get aliases.
+          alias tetraevents='kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact'
+          alias hobs='hubble observe --follow'
+
+    - name: Report installed versions
+      shell: |
+        helm version --short
+        cilium version --client
+        hubble version
+        tetra version
+      register: lab_tool_versions
+      changed_when: false
+
+    - name: Display installed versions
+      debug:
+        var: lab_tool_versions.stdout_lines
