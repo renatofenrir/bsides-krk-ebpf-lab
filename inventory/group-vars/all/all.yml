@@ -37,11 +37,10 @@ kube_service_addresses: 10.233.0.0/18
 # No leading "v": Kubespray v2.31 compares this numerically and crashes on it
 # ("'<' not supported between instances of 'str' and 'int'").
 #
-# Must be one Kubespray v2.31.0 has checksums for: 1.33.0 through 1.35.4.
-# 1.33 rather than prod's 1.35.4 because this lab installs Cilium 1.18.1 by
-# hand (CILIUM_VERSION in .gitlab-ci.yml), and 1.33 is the newest Kubernetes
-# that Cilium release was tested against. Prod gets 1.35 away with Cilium 1.19.
-kube_version: 1.33.11
+# Matches prod exactly: bifrost-prod-v4 runs Kubernetes 1.35.4 (Kubespray
+# v2.31.0's default) with Cilium 1.18.1 (CILIUM_VERSION in .gitlab-ci.yml).
+# Kubespray v2.31.0 only has checksums for 1.33.0 through 1.35.4.
+kube_version: 1.35.4
 
 # --- DNS ------------------------------------------------------------------
 upstream_dns_servers:

@@ -140,8 +140,8 @@ Takes 20–30 minutes. When it finishes:
 ```console
 $ kubectl get nodes
 NAME                           STATUS     ROLES           AGE   VERSION
-k8s-master-0-bsides-krk-demo   NotReady   control-plane   2m    v1.33.11
-k8s-worker-0-bsides-krk-demo   NotReady   <none>          1m    v1.33.11
+k8s-master-0-bsides-krk-demo   NotReady   control-plane   2m    v1.35.4
+k8s-worker-0-bsides-krk-demo   NotReady   <none>          1m    v1.35.4
 ```
 
 **`NotReady` is correct here.** There is no CNI yet. CoreDNS will be `Pending`
@@ -215,8 +215,8 @@ Deployment             hubble-ui          Desired: 1, Ready: 1/1, Available: 1/1
 ```console
 $ kubectl get nodes
 NAME                           STATUS   ROLES           AGE   VERSION
-k8s-master-0-bsides-krk-demo   Ready    control-plane   8m    v1.33.11
-k8s-worker-0-bsides-krk-demo   Ready    <none>          7m    v1.33.11
+k8s-master-0-bsides-krk-demo   Ready    control-plane   8m    v1.35.4
+k8s-worker-0-bsides-krk-demo   Ready    <none>          7m    v1.35.4
 ```
 
 ### 1.4 — LoadBalancer IPs, L2 announcement, add-ons
