@@ -54,6 +54,25 @@ variables:
     - docker run --rm -u="0:0" -v $PWD:/workspace -w="/workspace" alpine
         sh -c 'rm -rf vms/.terraform components/.terraform 2>/dev/null || true'
 
+# Terraform says "a number is required" whether the template ID is missing,
+# misnamed or malformed. Fail before Terraform, and say which one it is.
+.check_template_id:
+  script:
+    - |
+      case "$TF_VAR_TEMPLATE_VM_ID" in
+        ''|*[!0-9]*)
+          echo "[ERROR] TF_VAR_TEMPLATE_VM_ID must be a bare VMID, got ${#TF_VAR_TEMPLATE_VM_ID} chars:"
+          printf '%s' "$TF_VAR_TEMPLATE_VM_ID" | od -c | head -3
+          if [ -n "${TF_VAR_TEMPLATE_VM_ID_STANDARD:-}" ]; then
+            echo "[HINT] TF_VAR_TEMPLATE_VM_ID_STANDARD is set. That is prod's name; this repo reads TF_VAR_TEMPLATE_VM_ID."
+          fi
+          if [ -f "$TF_VAR_TEMPLATE_VM_ID" ]; then
+            echo "[HINT] The value is a file path: the variable is type File, it should be type Variable."
+          fi
+          exit 1
+          ;;
+      esac
+
 # ──────────────────────────────────────────────
 # Stage 1: Plan VMs
 # ──────────────────────────────────────────────
@@ -65,6 +84,7 @@ plan-vms:
     <<: *vm_vars
   <<: *clean_terraform
   script:
+    - !reference [.check_template_id, script]
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
@@ -102,6 +122,7 @@ apply-vms:
     <<: *vm_vars
   <<: *clean_terraform
   script:
+    - !reference [.check_template_id, script]
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
@@ -341,6 +362,7 @@ destroy:
     <<: *vm_vars
   <<: *clean_terraform
   script:
+    - !reference [.check_template_id, script]
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
