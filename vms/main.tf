@@ -22,6 +22,11 @@ locals {
   cluster_suffix = "bsides-krk-demo"
 
   common_tags = ["bsides", "lab", "ebpf", "disposable"]
+
+  ssh_public_keys = concat(
+    [var.ssh_public_key],
+    [for k in split("\n", var.extra_ssh_public_keys) : trimspace(k) if trimspace(k) != ""],
+  )
 }
 
 resource "proxmox_virtual_environment_vm" "master" {
@@ -85,7 +90,7 @@ resource "proxmox_virtual_environment_vm" "master" {
       servers = [var.dns_server]
     }
     user_account {
-      keys = [var.ssh_public_key]
+      keys = local.ssh_public_keys
     }
   }
 }
@@ -147,7 +152,7 @@ resource "proxmox_virtual_environment_vm" "worker" {
       servers = [var.dns_server]
     }
     user_account {
-      keys = [var.ssh_public_key]
+      keys = local.ssh_public_keys
     }
   }
 }

@@ -26,8 +26,23 @@ variable "template_vm_id" {
 }
 
 variable "ssh_public_key" {
-  description = "SSH public key injected into the ubuntu user via cloud-init."
+  description = <<-EOT
+    SSH public key injected into the ubuntu user via cloud-init. This is the
+    CI key: its private half is the SSH_PRIVATE_KEY File variable that every
+    SSH step in the pipeline authenticates with.
+  EOT
   type        = string
+}
+
+variable "extra_ssh_public_keys" {
+  description = <<-EOT
+    Additional public keys for the ubuntu user, one per line -- e.g. a personal
+    key for logging in during the talk. A newline-separated string rather than
+    a list so an unset TF_VAR_extra_ssh_public_keys is simply empty instead of
+    an HCL parse error.
+  EOT
+  type        = string
+  default     = ""
 }
 
 variable "proxmox_node" {

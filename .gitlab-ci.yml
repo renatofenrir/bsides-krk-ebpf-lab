@@ -73,6 +73,31 @@ variables:
           ;;
       esac
 
+# Every SSH step authenticates with SSH_PRIVATE_KEY (a File-type CI variable),
+# never with whatever happens to sit in the runner's ~/.ssh. The runner's own
+# keys are not in the lab VMs' authorized_keys, and should not need to be.
+# Prints the public fingerprint only, so a wrong key is obvious from the log.
+.use_ci_ssh_key:
+  script:
+    - |
+      if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+        echo "[ERROR] SSH_PRIVATE_KEY is not set. Add it in Settings > CI/CD > Variables, type File."
+        exit 1
+      fi
+      if [ ! -f "$SSH_PRIVATE_KEY" ]; then
+        echo "[ERROR] SSH_PRIVATE_KEY is not a file path: the variable is type Variable, it must be type File."
+        exit 1
+      fi
+      # GitLab can drop the trailing newline, and OpenSSH rejects the key without it.
+      [ -n "$(tail -c1 "$SSH_PRIVATE_KEY")" ] && echo >> "$SSH_PRIVATE_KEY"
+      chmod 600 "$SSH_PRIVATE_KEY"
+      if ! ssh-keygen -y -P "" -f "$SSH_PRIVATE_KEY" > /dev/null 2>&1; then
+        echo "[ERROR] SSH_PRIVATE_KEY is not a readable private key, or it has a passphrase."
+        exit 1
+      fi
+      echo "[INFO] Using CI SSH key: $(ssh-keygen -y -P "" -f "$SSH_PRIVATE_KEY" | ssh-keygen -lf -)"
+      export ANSIBLE_PRIVATE_KEY_FILE="$SSH_PRIVATE_KEY"
+
 # ──────────────────────────────────────────────
 # Stage 1: Plan VMs
 # ──────────────────────────────────────────────
@@ -92,6 +117,7 @@ plan-vms:
         --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
         --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
         --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
+        --env TF_VAR_extra_ssh_public_keys
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
@@ -130,6 +156,7 @@ apply-vms:
         --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
         --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
         --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
+        --env TF_VAR_extra_ssh_public_keys
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
@@ -161,6 +188,7 @@ bootstrap-cluster:
   variables:
     <<: *ansible_vars
   script:
+    - !reference [.use_ci_ssh_key, script]
     - echo "[INFO] Waiting for SSH on both nodes.."
     - ansible -i inventory/inventory.ini all
         -m wait_for_connection -a "timeout=300 sleep=5 delay=10"
@@ -182,12 +210,12 @@ bootstrap-cluster:
     - docker run --rm
         -v $PWD/inventory/inventory.ini:/kubespray/inventory/inventory.ini:ro
         -v $PWD/inventory/group-vars:/kubespray/inventory/group_vars:ro
-        --mount type=bind,source="${HOME}"/.ssh/id_rsa,dst=/root/.ssh/id_rsa,readonly
+        --mount type=bind,source="$SSH_PRIVATE_KEY",dst=/root/.ssh/ci_key,readonly
         $KUBESPRAY_IMG
         ansible-playbook -i inventory/inventory.ini
           -e ansible_user=ubuntu -e ansible_become=yes
           -e host_key_checking=false -e kube_owner=root
-          --private-key /root/.ssh/id_rsa
+          --private-key /root/.ssh/ci_key
           cluster.yml
 
     - echo "[INFO] Creating kubeconfig on the master.."
@@ -212,8 +240,9 @@ fetch-kubeconfig:
   stage: fetch-kubeconfig
   when: manual
   script:
+    - !reference [.use_ci_ssh_key, script]
     - mkdir -p $HOME/.kube
-    - ssh -o StrictHostKeyChecking=no ubuntu@$MASTER_IP
+    - ssh -i "$SSH_PRIVATE_KEY" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no ubuntu@$MASTER_IP
         "sudo cat /etc/kubernetes/admin.conf" > $HOME/.kube/config
     # kube-proxy is gone, so the ClusterIP is unreachable until Cilium
     # programs it. Point at the node IP instead.
@@ -272,6 +301,7 @@ install-cilium:
   variables:
     <<: *ansible_vars
   script:
+    - !reference [.use_ci_ssh_key, script]
     - ansible -i inventory/inventory.ini kube_control_plane
         -m shell -a "cilium install --version $CILIUM_VERSION
           --set ipam.mode=kubernetes
@@ -370,6 +400,7 @@ destroy:
         --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
         --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
         --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
+        --env TF_VAR_extra_ssh_public_keys
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
