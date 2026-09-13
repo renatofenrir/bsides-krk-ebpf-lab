@@ -68,6 +68,10 @@ plan-vms:
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        --env "TF_VAR_PM_USER=$TF_VAR_PM_USER"
+        --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
+        --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
+        --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
@@ -101,6 +105,10 @@ apply-vms:
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        --env "TF_VAR_PM_USER=$TF_VAR_PM_USER"
+        --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
+        --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
+        --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
@@ -336,6 +344,10 @@ destroy:
     - docker run --rm
         --env "AWS_ACCESS_KEY_ID=$MINIO_ACCESS_TOKEN"
         --env "AWS_SECRET_ACCESS_KEY=$MINIO_SECRET_KEY"
+        --env "TF_VAR_PM_USER=$TF_VAR_PM_USER"
+        --env "TF_VAR_PM_PASSWORD=$TF_VAR_PM_PASSWORD"
+        --env "TF_VAR_TEMPLATE_VM_ID=$TF_VAR_TEMPLATE_VM_ID"
+        --env "TF_VAR_SSH_PUBLIC_KEY=$TF_VAR_SSH_PUBLIC_KEY"
         -u="0:0"
         -v $PWD/vms:/terraform
         -w="/terraform"
