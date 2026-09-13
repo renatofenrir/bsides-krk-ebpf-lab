@@ -105,6 +105,17 @@ cluster: deps ## Bootstrap Kubernetes with Kubespray (no CNI, no kube-proxy)
 	@echo ""
 	@echo "[INFO] Nodes will read NotReady until Cilium is installed. Expected."
 
+.PHONY: scale
+scale: ## Join a newly-added node (Kubespray scale.yml, not a full re-run)
+	@# Adding a third node: append its IP to worker_ips in vms/variables.tf,
+	@# add it to inventory/inventory.ini, `make vms`, then this.
+	@#
+	@# scale.yml rather than cluster.yml on purpose -- cluster.yml re-runs every
+	@# role against every node, including the control plane, which on a live
+	@# demo cluster is a long way to go for one extra worker.
+	$(call kubespray,scale.yml)
+	$(ON_MASTER) "kubectl get nodes -o wide"
+
 .PHONY: untaint
 untaint: ## Make the control plane schedulable (two-node cluster needs this)
 	$(ON_MASTER) "kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true"
