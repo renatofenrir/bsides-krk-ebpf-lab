@@ -149,6 +149,7 @@ crds: ## Gateway API CRDs (same v1.5.1 as prod; Cilium has Gateway API off)
 .PHONY: cilium
 cilium: ## Install Cilium with the lab's flag set, from the control plane
 	$(ON_MASTER) "cilium install --version $(CILIUM_VERSION) \
+	  --set cluster.name=default \
 	  --set ipam.mode=kubernetes \
 	  --set kubeProxyReplacement=true \
 	  --set l2announcements.enabled=true \

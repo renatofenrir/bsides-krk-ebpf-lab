@@ -301,6 +301,13 @@ bootstrap-crds:
 #
 # Safe to re-run: if the release already exists it is upgraded to exactly
 # these flags (--reset-values) instead of failing with "cannot re-use a name".
+#
+# cluster.name is pinned to "default", prod's value. Left unset, `cilium
+# install` auto-detects "cluster-local" from the kubeconfig while `cilium
+# upgrade --reset-values` falls back to "default", and Hubble Relay then
+# rejects the agents' TLS certs (issued for the other name) and crash-loops.
+# The upgrade reuses existing Hubble certs, so they are deleted first to force
+# certs for the current name.
 # ──────────────────────────────────────────────
 install-cilium:
   tags: [terraform]
@@ -309,6 +316,7 @@ install-cilium:
   variables:
     <<: *ansible_vars
     CILIUM_FLAGS: >-
+      --set cluster.name=default
       --set ipam.mode=kubernetes
       --set kubeProxyReplacement=true
       --set l2announcements.enabled=true
@@ -324,8 +332,9 @@ install-cilium:
     - ansible -i inventory/inventory.ini kube_control_plane
         -m shell -a "if helm status cilium -n kube-system >/dev/null 2>&1; then
             echo 'cilium release exists, upgrading it';
+            kubectl -n kube-system delete secret hubble-server-certs hubble-relay-client-certs --ignore-not-found &&
             cilium upgrade --version $CILIUM_VERSION --reset-values $CILIUM_FLAGS &&
-            kubectl -n kube-system rollout restart deploy/cilium-operator ds/cilium;
+            kubectl -n kube-system rollout restart deploy/cilium-operator ds/cilium deploy/hubble-relay;
           else
             cilium install --version $CILIUM_VERSION $CILIUM_FLAGS;
           fi"

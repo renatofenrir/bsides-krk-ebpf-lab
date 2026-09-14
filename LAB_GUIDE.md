@@ -174,6 +174,7 @@ fetching them from GitHub at apply time, so a venue network that cannot reach
 
 ```bash
 cilium install --version 1.18.1 \
+  --set cluster.name=default \
   --set ipam.mode=kubernetes \
   --set kubeProxyReplacement=true \
   --set l2announcements.enabled=true \
@@ -186,9 +187,11 @@ cilium install --version 1.18.1 \
   --set k8sClientRateLimit.burst=200
 ```
 
-The first six flags are ✅ from the original lab (it also had
-`gatewayAPI.enabled=true`, dropped above). The last four are
-additions, and both pairs are load-bearing:
+`cluster.name=default` pins prod's cluster name: left to auto-detection,
+`cilium install` picks `cluster-local`, a later upgrade picks `default`, and
+Hubble Relay rejects the agents' TLS certs over the mismatch. The next six
+flags are ✅ from the original lab (it also had `gatewayAPI.enabled=true`,
+dropped above). The last four are additions, and both pairs are load-bearing:
 
 - **`k8sServiceHost` / `k8sServicePort`** — kube-proxy is gone, so nothing has
   programmed the `10.233.0.1` ClusterIP. But Cilium needs the API server to
