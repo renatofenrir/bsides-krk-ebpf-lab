@@ -135,10 +135,10 @@ kubeconfig: ## Pull the kubeconfig to the laptop under its own context
 	@echo "  export KUBECONFIG=$(HOME)/.kube/bsides-lab.conf"
 
 .PHONY: crds
-crds: ## Gateway API CRDs -- MUST run before `make cilium`
-	@# Cilium is installed with gatewayAPI.enabled=true and its operator watches
-	@# Gateway/HTTPRoute at startup. If the CRDs are not there yet it goes into
-	@# CrashLoopBackOff with a missing-CRD error that reads like a Cilium bug.
+crds: ## Gateway API CRDs (same v1.5.1 as prod; Cilium has Gateway API off)
+	@# Keeps the lab's CRDs identical to prod's. Cilium does not consume them:
+	@# with gatewayAPI.enabled=true, Cilium 1.18.1's operator crash-loops on
+	@# v1.5.1's TLSRoute, so the flag is off here just as in prod.
 	@#
 	@# Same shape as prod's bootstrap-crds stage: one targeted apply against the
 	@# components state, before the thing that depends on it exists. The rest of
@@ -152,7 +152,6 @@ cilium: ## Install Cilium with the lab's flag set, from the control plane
 	  --set ipam.mode=kubernetes \
 	  --set kubeProxyReplacement=true \
 	  --set l2announcements.enabled=true \
-	  --set gatewayAPI.enabled=true \
 	  --set hubble.relay.enabled=true \
 	  --set hubble.ui.enabled=true \
 	  --set socketLB.hostNamespaceOnly=true \

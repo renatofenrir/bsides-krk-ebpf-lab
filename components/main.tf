@@ -66,10 +66,9 @@
 #
 # --- Gateway API CRDs ------------------------------------------------------
 #
-# REQUIRED, and required EARLY. Cilium is installed with gatewayAPI.enabled=true,
-# and the operator watches Gateway/HTTPRoute resources whose CRDs must already
-# exist -- install Cilium first and it CrashLoopBackOffs on a missing-CRD error
-# that reads like a Cilium bug and is not one.
+# Same CRDs as prod. Cilium does not use them: Gateway API is off in the lab's
+# Cilium just as in prod's, because Cilium 1.18.1's operator crash-loops on
+# v1.5.1's TLSRoute (it wants v1alpha2, which v1.5.1 no longer serves).
 #
 # The module vendors the v1.5.1 standard channel rather than fetching from
 # GitHub at apply time, so a venue network that cannot reach raw.githubusercontent

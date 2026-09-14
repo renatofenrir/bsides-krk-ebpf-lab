@@ -258,9 +258,9 @@ fetch-kubeconfig:
 # Gateway API CRDs, and nothing else, applied before Cilium.
 #
 # Prod has a stage with this name for a different reason -- its modules CONSUME
-# CRDs that the kubectl provider resolves live at plan time. Here the reason is
-# ordering against Cilium: gatewayAPI.enabled=true makes the operator watch
-# Gateway/HTTPRoute at startup, and a missing CRD puts it in CrashLoopBackOff.
+# CRDs that the kubectl provider resolves live at plan time. Here it just keeps
+# the lab's CRDs identical to prod's. Cilium does not use them: Gateway API is
+# off in both (see install-cilium).
 #
 # The rest of the stack has to wait for apply-components: with no CNI yet,
 # metrics-server and local-path would only sit Pending.
@@ -293,6 +293,14 @@ bootstrap-crds:
 # Run from the control plane, which already has the CLI from
 # install-master-deps.yml. See LAB_GUIDE.md §1.3 for why the last four flags
 # are here and not in the original runbook.
+#
+# No gatewayAPI.enabled, same as prod's Cilium. Cilium 1.18.1's operator asks
+# for TLSRoute v1alpha2, which the Gateway API v1.5.1 CRDs (also prod's) no
+# longer serve, so with it enabled the operator crash-loops and no pod ever
+# gets networking.
+#
+# Safe to re-run: if the release already exists it is upgraded to exactly
+# these flags (--reset-values) instead of failing with "cannot re-use a name".
 # ──────────────────────────────────────────────
 install-cilium:
   tags: [terraform]
@@ -300,21 +308,27 @@ install-cilium:
   when: manual
   variables:
     <<: *ansible_vars
+    CILIUM_FLAGS: >-
+      --set ipam.mode=kubernetes
+      --set kubeProxyReplacement=true
+      --set l2announcements.enabled=true
+      --set hubble.relay.enabled=true
+      --set hubble.ui.enabled=true
+      --set socketLB.hostNamespaceOnly=true
+      --set k8sServiceHost=$MASTER_IP
+      --set k8sServicePort=6443
+      --set k8sClientRateLimit.qps=50
+      --set k8sClientRateLimit.burst=200
   script:
     - !reference [.use_ci_ssh_key, script]
     - ansible -i inventory/inventory.ini kube_control_plane
-        -m shell -a "cilium install --version $CILIUM_VERSION
-          --set ipam.mode=kubernetes
-          --set kubeProxyReplacement=true
-          --set l2announcements.enabled=true
-          --set gatewayAPI.enabled=true
-          --set hubble.relay.enabled=true
-          --set hubble.ui.enabled=true
-          --set socketLB.hostNamespaceOnly=true
-          --set k8sServiceHost=$MASTER_IP
-          --set k8sServicePort=6443
-          --set k8sClientRateLimit.qps=50
-          --set k8sClientRateLimit.burst=200"
+        -m shell -a "if helm status cilium -n kube-system >/dev/null 2>&1; then
+            echo 'cilium release exists, upgrading it';
+            cilium upgrade --version $CILIUM_VERSION --reset-values $CILIUM_FLAGS &&
+            kubectl -n kube-system rollout restart deploy/cilium-operator ds/cilium;
+          else
+            cilium install --version $CILIUM_VERSION $CILIUM_FLAGS;
+          fi"
         -e "$ANSIBLE_BECOME"
 
     - echo "[INFO] Waiting for Cilium.."

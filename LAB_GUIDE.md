@@ -156,10 +156,12 @@ make crds      # MUST come first
 make cilium
 ```
 
-**Order matters and the failure is misleading.** `gatewayAPI.enabled=true`
-makes the Cilium operator watch Gateway and HTTPRoute at startup. If those CRDs
-are not there yet it goes into CrashLoopBackOff with a missing-CRD error that
-reads like a Cilium bug and is not one.
+**Gateway API is off in Cilium, same as prod.** The CRDs are installed (v1.5.1,
+also prod's), but `gatewayAPI.enabled=true` crash-loops Cilium 1.18.1's
+operator: it asks for TLSRoute `v1alpha2`, which v1.5.1 no longer serves, and
+the agents then wait forever for the operator, so no pod gets networking.
+Phase 3's Gateway/HTTPRoute step needs a Cilium release that understands
+v1.5.1 before it can work.
 
 `make crds` is a targeted apply of just `module.gateway_api_crds` against the
 components stack — the same trick prod's `bootstrap-crds` stage uses. The rest
@@ -175,7 +177,6 @@ cilium install --version 1.18.1 \
   --set ipam.mode=kubernetes \
   --set kubeProxyReplacement=true \
   --set l2announcements.enabled=true \
-  --set gatewayAPI.enabled=true \
   --set hubble.relay.enabled=true \
   --set hubble.ui.enabled=true \
   --set socketLB.hostNamespaceOnly=true \
@@ -185,7 +186,8 @@ cilium install --version 1.18.1 \
   --set k8sClientRateLimit.burst=200
 ```
 
-The first seven flags are ✅ from the original lab. The last four are
+The first six flags are ✅ from the original lab (it also had
+`gatewayAPI.enabled=true`, dropped above). The last four are
 additions, and both pairs are load-bearing:
 
 - **`k8sServiceHost` / `k8sServicePort`** — kube-proxy is gone, so nothing has
