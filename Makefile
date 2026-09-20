@@ -215,6 +215,41 @@ kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 	@echo "VM is booting -- cloud-init installs nginx, allow ~4 minutes."
 	@echo "Watch:  kubectl -n kubevirt-demo get vmi -w"
 
+# --- Rehearsal loop --------------------------------------------------------
+#
+# Phase 2 is meant to be run over and over until the outcome is boring. These
+# targets remove it from the cluster and put it back, without touching
+# Kubernetes itself. (`make reset` is a different, DESTRUCTIVE thing: it wipes
+# the cluster via Kubespray.)
+
+.PHONY: lab-clean
+lab-clean: ## Remove Phase 2 from the cluster (policies + attacker/victim). Keeps Tetragon
+	-kubectl delete tracingpolicy kill-network-recon-binaries kill-tcpdump \
+	  monitor-network-activity-outside-cluster-cidr-range --ignore-not-found
+	-kubectl delete tracingpolicynamespaced kill-network-recon-binaries \
+	  -n tetragon-demo --ignore-not-found 2>/dev/null
+	-kubectl delete -f phase2-container-lab/attack/netshoot.yaml --ignore-not-found
+	@# The namespace must be fully gone before `make lab` recreates it, or the
+	@# apply races the terminating namespace and the pods never schedule.
+	@kubectl wait --for=delete namespace/tetragon-demo --timeout=180s 2>/dev/null || true
+	@echo "[INFO] Phase 2 removed. Tetragon is still installed."
+
+.PHONY: lab-reset
+lab-reset: lab-clean lab ## Tear Phase 2 down and bring it back (repeatable rehearsal loop)
+	@echo ""
+	@echo "Fresh Phase 2. Next: make detect  →  attacks  →  make mitigate"
+
+.PHONY: lab-purge
+lab-purge: lab-clean ## Also uninstall Tetragon itself (full Phase 2 removal)
+	-helm -n kube-system uninstall tetragon
+	@echo "[INFO] Tetragon uninstalled. 'make lab' reinstalls it."
+
+.PHONY: kubevirt-clean
+kubevirt-clean: ## Remove Phase 3 objects (VM, Service, Gateway, client, policies)
+	-kubectl delete namespace kubevirt-demo --ignore-not-found
+	@kubectl wait --for=delete namespace/kubevirt-demo --timeout=300s 2>/dev/null || true
+	@echo "[INFO] Phase 3 removed. KubeVirt itself is still installed."
+
 .PHONY: events
 events: ## Stream Tetragon events from the attacker's node (the 'terminal 2')
 	@# Tetragon events are PER NODE. `kubectl exec ds/tetragon` picks one pod --
@@ -288,7 +323,7 @@ destroy-components: ## terraform destroy the add-on stack only
 	$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform destroy -auto-approve -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
 
 .PHONY: reset
-reset: ## Kubespray reset.yml -- wipe Kubernetes, keep the VMs
+reset: ## DESTRUCTIVE: Kubespray reset.yml, wipes Kubernetes (for Phase 2 use lab-reset)
 	$(call kubespray,--extra-vars reset_confirmation=yes reset.yml)
 
 .PHONY: destroy-vms

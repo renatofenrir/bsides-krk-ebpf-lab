@@ -45,6 +45,16 @@ detection policy) or `❓ syscall` (the kill policies).
    before dying. A policy on `tcp_connect` alone would miss `nmap -sS`
    entirely, which is why the recon policy uses four hooks.
 
+## Rehearsing
+
+```bash
+SKIP_TETRA_CLI=1 make lab-reset   # ~50s: removes Phase 2 and redeploys it
+```
+
+`make lab-clean` removes it without redeploying, `make lab-purge` also removes
+Tetragon. **`make reset` is something else entirely** and wipes the Kubernetes
+install.
+
 ## Before moving to Phase 3
 
 The cluster-wide kill policy kills **curl**, and Phase 3 is driven by curl.

@@ -37,8 +37,12 @@ if kubectl -n kube-system logs ds/tetragon -c tetragon --tail=200 2>/dev/null \
   exit 1
 fi
 
-# tetra CLI on the operator laptop
-if ! command -v tetra >/dev/null; then
+# tetra CLI on the operator laptop. SKIP_TETRA_CLI=1 skips it -- the talk drives
+# tetra from inside the Tetragon pod anyway, and the install needs sudo, which
+# would block an unattended rehearsal loop (`make lab-reset`).
+if [ "${SKIP_TETRA_CLI:-0}" = "1" ]; then
+  echo "[INFO] SKIP_TETRA_CLI=1, not touching the local tetra CLI."
+elif ! command -v tetra >/dev/null; then
   echo "[INFO] Installing tetra CLI..."
   GOOS=$(go env GOOS 2>/dev/null || echo linux)
   GOARCH=$(go env GOARCH 2>/dev/null || echo amd64)
@@ -47,7 +51,7 @@ if ! command -v tetra >/dev/null; then
   sudo install /tmp/tetra /usr/local/bin/tetra
 fi
 
-tetra version
+command -v tetra >/dev/null && tetra version
 echo
-echo "Ready. Stream events with:"
-echo "  kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact"
+echo "Ready. Stream events with:  make events"
+echo "  (per-node: the pod on the ATTACKER's node, not whatever ds/tetragon picks)"

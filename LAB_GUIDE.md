@@ -451,6 +451,41 @@ all.
 > kubectl -n kube-system logs ds/tetragon -c tetragon | grep "adding tracing policy failed"
 > ```
 
+### 2.4b — Rehearsing the same run repeatedly
+
+Phase 2 is meant to be rehearsed until the outcome is boring. One cycle takes
+about **50 seconds**, almost all of it waiting for the namespace to delete:
+
+```bash
+make lab-reset     # lab-clean + lab: policies and pods removed, then redeployed
+make detect        # then the three attacks
+make mitigate      # then the kills
+make unmitigate    # back to the detection-only state
+```
+
+| Target | Removes | Keeps |
+|---|---|---|
+| `make lab-clean` | all three TracingPolicies (and the namespaced variant), attacker, victim, namespace | Tetragon, the cluster |
+| `make lab-reset` | the above, then redeploys Phase 2 | Tetragon, the cluster |
+| `make lab-purge` | the above **and** uninstalls Tetragon | the cluster |
+| `make kubevirt-clean` | Phase 3's `kubevirt-demo` namespace and policies | KubeVirt itself |
+| `make reset` | **DESTRUCTIVE: the whole Kubernetes install** (Kubespray `reset.yml`) | the VMs |
+
+`lab-clean` waits for the namespace to finish terminating before returning, so
+a following `make lab` can't race a namespace still going away.
+
+For an unattended loop, set `SKIP_TETRA_CLI=1` so the Tetragon script never
+tries to `sudo` a local CLI install:
+
+```bash
+SKIP_TETRA_CLI=1 make lab-reset
+```
+
+Two full cycles were run this way on 2026-09-20 with identical results:
+detection gave 5 connect events (4 nmap + 1 external curl, in-cluster call
+silent), and `nmap -sT`, `nmap -sS`, `curl`, `tcpdump` and `nc` all exited 137
+while `wget` kept working.
+
 ### 2.5 — Hubble, end to end
 
 ```bash
