@@ -12,7 +12,9 @@ make down    # gone
 ```
 
 **Start here: [`LAB_GUIDE.md`](./LAB_GUIDE.md)** — the step-by-step runbook.
-`make help` lists every target.
+`make help` lists every target, and
+**[`MAKE_TARGETS.md`](./MAKE_TARGETS.md)** documents what each one runs under
+the hood, what it needs, and what it changes.
 
 ## Why this is its own repo
 

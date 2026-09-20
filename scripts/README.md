@@ -65,9 +65,11 @@ helm upgrade --install tetragon cilium/tetragon --version 1.4.0 -n kube-system \
 
 ## `40-install-kubevirt.sh` 🚧
 
-1. Picks `KUBEVIRT_VERSION` (default: whatever
-   `storage.googleapis.com/kubevirt-prow/.../stable.txt` says **today**).
-   Pin it to match the `virtctl` on the master: `KUBEVIRT_VERSION=v1.9.0 make kubevirt`.
+1. Picks `KUBEVIRT_VERSION`. **Via `make kubevirt` this is pinned to `v1.9.0`**
+   (the Makefile exports it), matching the `virtctl` that
+   `install-master-deps.yml` puts on the master. Run the script *directly* and
+   it falls back to whatever
+   `storage.googleapis.com/kubevirt-prow/.../stable.txt` says today.
 2. Applies the KubeVirt operator and the `KubeVirt` CR from GitHub releases.
 3. **Nested virtualisation check**: SSHes to the worker (`10.1.1.41`, hard-coded,
    with your own SSH key) and looks for `vmx`/`svm` in `/proc/cpuinfo`. If

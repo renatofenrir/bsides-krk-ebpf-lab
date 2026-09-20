@@ -18,6 +18,16 @@ MASTER_IP         ?= 10.1.1.40
 CONTEXT           ?= bsides-krk-demo
 CILIUM_VERSION    ?= 1.18.1
 TETRAGON_VERSION  ?= 1.4.0
+# Pinned, not "whatever stable.txt says today": virtctl on the master is
+# installed at this version by install-master-deps.yml, and a floating KubeVirt
+# would drift away from it between rehearsal and talk.
+KUBEVIRT_VERSION  ?= v1.9.0
+
+# Make does NOT put makefile variables into a recipe's environment unless they
+# are exported, so without this `make tetragon TETRAGON_VERSION=x` would be
+# silently ignored by the script.
+export TETRAGON_VERSION
+export KUBEVIRT_VERSION
 
 # MinIO-as-S3 backend credentials, same as prod.
 AWS_ACCESS_KEY_ID     ?= $(MINIO_ACCESS_TOKEN)

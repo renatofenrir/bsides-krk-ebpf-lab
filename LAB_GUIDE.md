@@ -94,7 +94,9 @@ make up      # vms → cluster → untaint → kubeconfig → crds → cilium �
 
 Each step below is also its own target, which is what you want when something
 goes wrong mid-build — `make` picks up where it stopped rather than starting
-over. `make help` lists them all.
+over. `make help` lists them all, and
+[`MAKE_TARGETS.md`](./MAKE_TARGETS.md) documents the exact command each one
+runs, what it needs first, and what it changes.
 
 ### 1.1 — Clone the VMs
 
