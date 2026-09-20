@@ -42,6 +42,16 @@ phase2-container-lab/   Tetragon policies + attacker workload
 phase3-kubevirt-lab/    DRAFT — KubeVirt VM, Gateway, L4/L7 policies
 ```
 
+Every folder has its own README explaining what's in it and why:
+
+| Folder | README |
+|---|---|
+| Tetragon policies, in depth | [`phase2-container-lab/policies/`](phase2-container-lab/policies/README.md) |
+| Phase 2 overview / attack pods | [`phase2-container-lab/`](phase2-container-lab/README.md), [`attack/`](phase2-container-lab/attack/README.md) |
+| Phase 3 VM + L4/L7 network policies | [`phase3-kubevirt-lab/`](phase3-kubevirt-lab/README.md) |
+| VMs, inventory, scripts | [`vms/`](vms/README.md), [`inventory/`](inventory/README.md), [`scripts/`](scripts/README.md) |
+| Add-ons and each module | [`components/`](components/README.md), [`components/modules/`](components/modules/README.md) |
+
 ## The cluster
 
 Two nodes. The control plane is untainted and carries workloads, which is the
@@ -64,7 +74,7 @@ one, change the other.
 **Vendored** into `components/modules/`, copied out of
 `bifrost-k8s-extensions-module` at commit `bc4a1f4`: **gateway-api-crds**,
 **metrics-server**, **local-path**, **coredns-config**, plus
-**kube-prometheus-stack** wired up but off (`enable_monitoring = true`).
+**kube-prometheus-stack** wired up but off (set `enable_monitoring = true` to turn it on).
 
 Vendored rather than referenced so this repo depends on no other repo. A
 `terraform init` here needs no GitLab reachability and no `CI_JOB_TOKEN`, and

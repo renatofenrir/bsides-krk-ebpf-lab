@@ -9,3 +9,8 @@ terraform.tfvars
 ansible/artifacts/
 *.kubeconfig
 *.retry
+
+# Kubeconfigs are cluster-admin credentials -- never commit them
+.kube/
+config-bsides*
+config-prod*

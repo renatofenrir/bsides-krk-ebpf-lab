@@ -295,8 +295,21 @@ this is where you find out.
 **Terminal 2** — leave this streaming for the whole demo:
 
 ```bash
-make events     # kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
+make events     # streams from the Tetragon pod on the ATTACKER'S node, filtered to that pod
 ```
+
+> **Tetragon events are per node.** `kubectl exec ds/tetragon` picks a single
+> pod — here the control plane's — while the attacker runs on the worker, so
+> the attacks never appear and the stream fills with unrelated kube-system
+> activity (nodelocaldns running `iptables`, and so on). That is what `make
+> events` used to do. It now resolves the attacker's node first. By hand:
+> ```bash
+> kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon -o wide   # find the worker's pod
+> kubectl -n kube-system exec <that-pod> -c tetragon -- tetra getevents -o compact --pod attacker
+> ```
+> Also remember `🚀 process` / `💥 exit` lines are Tetragon's built-in process
+> events for **every** exec on that node. They are not policy hits. Policy hits
+> from this phase look like `🔌 connect` or `❓ syscall`.
 
 **Terminal 1:**
 
@@ -304,10 +317,12 @@ make events     # kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra g
 make detect
 ```
 
-⚠️ **RECONSTRUCTED.** The CIDRs in it — `10.233.0.0/18` (services) and
-`10.233.64.0/18` (pods) — are pinned in `ansible/group_vars/all/all.yml`. If
-you ever change those, change the policy or it flags every in-cluster
-connection as suspicious.
+⚠️ **RECONSTRUCTED**, but **validated on this cluster on 2026-09-20**: the
+in-cluster API call stayed silent, `nmap -sT` produced four connect events to
+node IPs and an external curl one. The CIDRs in it — `10.233.0.0/18` (services)
+and `10.233.64.0/18` (pods) — are pinned in
+`inventory/group-vars/all/all.yml`. If you ever change those, change the policy
+or it flags every in-cluster connection as suspicious.
 
 Now the three attacks:
 
@@ -359,22 +374,46 @@ $ kubectl exec -n tetragon-demo attacker -- tcpdump -i any -c 5
 command terminated with exit code 137
 ```
 
-**Exit code 137 = 128 + 9 = SIGKILL.** Terminal 2:
+**Exit code 137 = 128 + 9 = SIGKILL.** All three were confirmed on this cluster
+on 2026-09-20, along with `nmap -sS` (also 137) and `wget` (exit 0 — busybox,
+so not on the kill list; use it for an "allowed traffic still works" beat).
+
+Terminal 2, as actually observed:
 
 ```
-🚀 process tetragon-demo/attacker /usr/bin/nmap -sT -p 22,6443 10.1.1.40-42
-🔌 connect tetragon-demo/attacker /usr/bin/nmap tcp 10.233.65.14:39822 -> 10.1.1.40:22
-💥 exit    tetragon-demo/attacker /usr/bin/nmap SIGKILL
-🚀 process tetragon-demo/attacker /usr/sbin/tcpdump -i any -c 5
-💥 exit    tetragon-demo/attacker /usr/sbin/tcpdump SIGKILL
+🚀 process tetragon-demo/attacker /usr/bin/nmap -sT -p 22,6443 10.1.1.40-41
+❓ syscall tetragon-demo/attacker /usr/bin/nmap raw_sendmsg
+💥 exit    tetragon-demo/attacker /usr/bin/nmap -sT -p 22,6443 10.1.1.40-41 SIGKILL
+🚀 process tetragon-demo/attacker /usr/bin/tcpdump -i any -c 5
+❓ syscall tetragon-demo/attacker /usr/bin/tcpdump security_socket_create
+💥 exit    tetragon-demo/attacker /usr/bin/tcpdump -i any -c 5 SIGKILL
 ```
 
-Note the asymmetry, and say it: **nmap dies after one connect event, tcpdump
-dies with none.** `kill-tcpdump` hooks `security_socket_create`, which fires
-*before* a socket exists — the process is gone before a single packet is
-captured. The recon policy hooks `tcp_connect`, which fires on the first
-outbound connection, so exactly one attempt is visible before the kill. That
-difference is the whole argument for choosing your hook point deliberately.
+Each kill prints the hook that fired. `tetra -o compact` renders these kprobe
+events as `❓ syscall`, not as pretty connect lines.
+
+**Which hook actually kills what** (measured, and *not* what the original notes
+claimed):
+
+| Attack | Killed at | Why |
+|---|---|---|
+| `nmap -sT` | `raw_sendmsg` | host discovery sends raw probes before any TCP connect |
+| `nmap -sT -Pn` | `ip_send_skb` | discovery skipped, but nmap still emits its own datagrams |
+| `nmap -sS` | `raw_sendmsg` | SYN scan builds its own packets |
+| `curl https://example.com` | `ip_send_skb` | the DNS lookup goes out first, as UDP |
+| `curl http://10.1.1.41:22` | `tcp_connect` | no DNS, so the TCP connect is the first packet |
+| `tcpdump` | `security_socket_create` | fires before a socket exists |
+
+**The line to say on stage:** the *earliest* hook wins. With four hooks
+attached, the process dies at whichever one it trips first — for nmap that is
+raw packet transmission, long before `tcp_connect`. tcpdump is the extreme
+case: `security_socket_create` runs before a socket exists, so it dies with no
+network activity at all.
+
+**If you want the "one connect event, then the kill" visual**, use
+`curl http://10.1.1.41:22` (an IP, so no DNS lookup first). Note it prints the
+connect line **twice** while both the detection and the kill policy are
+applied: both hook `tcp_connect`, and each policy reports the event.
 
 The `kill-network-recon-binaries` policy hooks four places on purpose:
 
@@ -392,9 +431,25 @@ all.
 > ⚠️ **`raw_sendmsg` and `packet_sendmsg` are static kernel symbols.** They are
 > usually in kallsyms but are not guaranteed on every build. If one is missing,
 > Tetragon rejects the **whole** TracingPolicy rather than just that hook — the
-> policy sits there doing nothing. Check with
-> `kubectl describe tracingpolicy kill-network-recon-binaries`. This is why it
-> is in the pre-flight checklist.
+> policy sits there doing nothing. This is why it is in the pre-flight checklist.
+> Both were present on 2026-09-20, and all five hooks attached cleanly.
+>
+> ⚠️ **A policy can fail to load with no sign of it in `kubectl`.** The
+> TracingPolicy CRD has **no status field**, so `kubectl get/describe
+> tracingpolicy` looks healthy whatever happened. On 2026-09-20 every policy on
+> this cluster silently did nothing, because Tetragon 1.4.0's **kprobe-multi**
+> BPF object does not load on kernel 7.0.0-31-generic:
+> ```
+> adding tracing policy failed ... bpf_multi_kprobe_v61.o ...
+> program generic_kprobe_event: load program: invalid argument
+> ```
+> `scripts/30-install-tetragon.sh` now installs with
+> `--set tetragon.extraArgs.disable-kprobe-multi=true` (single kprobes, which
+> work) and fails loudly if any policy fails to load. **The only way to see
+> this class of failure is the agent log:**
+> ```bash
+> kubectl -n kube-system logs ds/tetragon -c tetragon | grep "adding tracing policy failed"
+> ```
 
 ### 2.5 — Hubble, end to end
 

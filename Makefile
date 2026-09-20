@@ -216,7 +216,20 @@ kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 	@echo "Watch:  kubectl -n kubevirt-demo get vmi -w"
 
 .PHONY: events
-events: ## Stream Tetragon events (the 'terminal 2' of the talk)
+events: ## Stream Tetragon events from the attacker's node (the 'terminal 2')
+	@# Tetragon events are PER NODE. `kubectl exec ds/tetragon` picks one pod --
+	@# on this cluster the control plane's -- while the attacker runs on the
+	@# worker, so the attacks never show up and the stream fills with unrelated
+	@# kube-system activity. Pick the pod on the attacker's node instead.
+	@node=$$(kubectl -n tetragon-demo get pod attacker -o jsonpath='{.spec.nodeName}' 2>/dev/null); \
+	if [ -z "$$node" ]; then echo "attacker pod not found -- run 'make lab' first"; exit 1; fi; \
+	pod=$$(kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon \
+	        --field-selector spec.nodeName=$$node -o jsonpath='{.items[0].metadata.name}'); \
+	echo "[INFO] streaming from $$pod on $$node"; \
+	kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact --pod attacker
+
+.PHONY: events-all
+events-all: ## Stream Tetragon events from every node, unfiltered (noisy)
 	kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
 
 .PHONY: status
@@ -236,6 +249,15 @@ preflight: ## Run the night-before checks
 	@$(ANSIBLE) -i inventory/inventory.ini all -m shell \
 	  -e "ansible_user=ubuntu ansible_become=yes" \
 	  -a 'grep -wcE "raw_sendmsg|packet_sendmsg" /proc/kallsyms'
+	@echo "── TracingPolicies actually loaded? ───"
+	@# The CRD has no status field: a policy can be "applied" and inert. The
+	@# agent log is the only place this shows up. Seen 2026-09-20 with
+	@# kprobe-multi on kernel 7.0.0-31-generic.
+	@if kubectl -n kube-system logs ds/tetragon -c tetragon --tail=300 2>/dev/null \
+	     | grep -q "adding tracing policy failed"; then \
+	  echo "  FAIL: a TracingPolicy did not load -- see:"; \
+	  echo "    kubectl -n kube-system logs ds/tetragon -c tetragon | grep 'adding tracing policy failed'"; \
+	else echo "  ok (no load failures in the recent agent log)"; fi
 	@echo "── Nested virt (Phase 3) ──────────────"
 	@$(ANSIBLE) -i inventory/inventory.ini all -m shell \
 	  -e "ansible_user=ubuntu ansible_become=yes" \

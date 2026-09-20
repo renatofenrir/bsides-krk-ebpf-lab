@@ -10,13 +10,32 @@ TETRAGON_VERSION="${TETRAGON_VERSION:-1.4.0}"
 helm repo add cilium https://helm.cilium.io >/dev/null
 helm repo update >/dev/null
 
+# --disable-kprobe-multi is NOT optional on this cluster. Verified 2026-09-20 on
+# kernel 7.0.0-31-generic (Ubuntu 26.04): Tetragon 1.4.0's kprobe-multi object
+# fails to load and EVERY TracingPolicy silently does nothing --
+#   "failed prog /var/lib/tetragon/bpf_multi_kprobe_v61.o ...
+#    program generic_kprobe_event: load program: invalid argument"
+# The TracingPolicy CRD has no status field, so `kubectl get/describe
+# tracingpolicy` looks perfectly healthy while nothing is hooked. The only
+# evidence is `kubectl -n kube-system logs ds/tetragon -c tetragon | grep
+# "adding tracing policy failed"`. Single kprobes work fine.
 helm upgrade --install tetragon cilium/tetragon \
   --version "${TETRAGON_VERSION}" \
   --namespace kube-system \
   --set tetragon.enableProcessCred=true \
-  --set tetragon.enableProcessNs=true
+  --set tetragon.enableProcessNs=true \
+  --set tetragon.extraArgs.disable-kprobe-multi=true
 
 kubectl -n kube-system rollout status ds/tetragon --timeout=180s
+
+# Fail loudly if a policy could not be loaded into the kernel -- this is the
+# failure mode that looks like "the demo just does not work".
+if kubectl -n kube-system logs ds/tetragon -c tetragon --tail=200 2>/dev/null \
+     | grep -q "adding tracing policy failed"; then
+  echo "[ERROR] Tetragon failed to load a TracingPolicy. Check:"
+  echo "        kubectl -n kube-system logs ds/tetragon -c tetragon | grep 'adding tracing policy failed'"
+  exit 1
+fi
 
 # tetra CLI on the operator laptop
 if ! command -v tetra >/dev/null; then
