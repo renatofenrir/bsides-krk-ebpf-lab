@@ -177,6 +177,18 @@ Leaves the detection policy in place. Does **not** touch the namespaced variant 
 
 ## The rehearsal loop
 
+At a glance:
+
+| Target | Removes | Keeps |
+|---|---|---|
+| `make lab-clean` | all policies, attacker, victim, namespace | Tetragon, cluster |
+| `make lab-reset` | the above, then redeploys | Tetragon, cluster |
+| `make lab-purge` | the above plus Tetragon | cluster |
+| `make kubevirt-clean` | Phase 3 namespace and policies | KubeVirt |
+
+⚠️ `make reset` is **not** part of this group: it wipes the whole Kubernetes
+install via Kubespray. See [Teardown](#teardown).
+
 ### `make lab-clean`
 ```bash
 kubectl delete tracingpolicy kill-network-recon-binaries kill-tcpdump \
