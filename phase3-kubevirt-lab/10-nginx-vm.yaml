@@ -69,52 +69,17 @@ spec:
             image: quay.io/containerdisks/ubuntu:24.04
         - name: cloudinitdisk
           cloudInitNoCloud:
-            userData: |-
-              #cloud-config
-              package_update: true
-              packages:
-                - nginx
-              write_files:
-                - path: /etc/nginx/sites-available/default
-                  content: |
-                    server {
-                      listen 80 default_server;
-                      root /var/www/html;
-                      index index.nginx-debian.html;
-
-                      location / {
-                        try_files $uri $uri/ =404;
-                      }
-
-                      # Served without an extension, so nginx would otherwise
-                      # hand them out as application/octet-stream and curl
-                      # would print nothing useful on stage.
-                      location = /details {
-                        default_type text/html;
-                        try_files /details =404;
-                      }
-                      location = /secret {
-                        default_type text/html;
-                        try_files /secret =404;
-                      }
-                    }
-                - path: /usr/local/bin/render-details.sh
-                  permissions: "0755"
-                  content: |
-                    #!/bin/bash
-                    # Rendered at boot rather than baked in, so the IP shown is
-                    # the real one the guest ended up with.
-                    IP=$(hostname -I | awk '{print $1}')
-                    {
-                      printf '<h1>VMDetails</h1>'
-                      printf '<p>Name: %s</p>' "$(hostname)"
-                      printf '<p>IP: %s </p>' "$IP"
-                      printf '<p>Locale: %s</p>' "$(locale | tr '\n' ' ')"
-                    } > /var/www/html/details
-                - path: /var/www/html/secret
-                  content: |
-                    <h1>TOP SECRET</h1><p>flag{ebpf-runtime-security}</p>
-              runcmd:
-                - [ bash, /usr/local/bin/render-details.sh ]
-                - [ systemctl, restart, nginx ]
-                - [ systemctl, enable, nginx ]
+            # KubeVirt caps INLINE userData at 2048 bytes, and this cloud-config
+            # is ~4.5 KB (nginx setup + the Phase 2 toolkit + Tetragon in the
+            # guest), so it lives in a Secret instead. Create/update it from
+            # cloud-init/nginx-vm-user-data.yaml -- `make kubevirt` does this,
+            # or by hand:
+            #   kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
+            #     --from-file=userdata=phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml \
+            #     --dry-run=client -o yaml | kubectl apply -f -
+            # Editing the file alone changes nothing until the Secret is
+            # updated AND the VM restarted.
+            # Field is `secretRef` (it holds the *userdata* secret);
+            # `userDataSecretRef` is rejected by the API.
+            secretRef:
+              name: nginx-vm-cloudinit

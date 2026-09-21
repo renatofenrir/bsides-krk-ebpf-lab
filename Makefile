@@ -217,6 +217,13 @@ unmitigate: ## Drop the cluster-wide kill policies (REQUIRED before `make kubevi
 .PHONY: kubevirt
 kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 	./scripts/40-install-kubevirt.sh
+	@# The VM's cloud-config is ~4.5 KB and KubeVirt caps INLINE userData at
+	@# 2048 bytes, so it ships as a Secret built from the file on disk. Edit
+	@# cloud-init/nginx-vm-user-data.yaml, re-run this, and restart the VM.
+	kubectl create namespace kubevirt-demo --dry-run=client -o yaml | kubectl apply -f -
+	kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
+	  --from-file=userdata=phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml \
+	  --dry-run=client -o yaml | kubectl apply -f -
 	kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml
 	kubectl apply -f phase3-kubevirt-lab/20-service.yaml
 	kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml

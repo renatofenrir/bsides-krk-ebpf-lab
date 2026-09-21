@@ -14,7 +14,10 @@ things on stage, so they are worth internalising before you rehearse.
 |---|---|---|
 | ✅ **BATTLE-TESTED** | Presented at the Heineken Kraków warm-up talk and known to work | `kill-tcpdump` policy, Cilium flag set |
 | ⚠️ **RECONSTRUCTED** | Original YAML was lost with the deleted cluster; rebuilt from described behaviour. Behaviour should match, byte-for-byte equivalence is not claimed | `monitor-outside-cluster-cidr`, `kill-network-recon-binaries` |
-| 🚧 **DRAFT / UNVALIDATED** | Phase 3. Never run anywhere. Rehearse before showing | everything under `phase3-kubevirt-lab/` |
+| 🚧 **PARKED** | Written, not part of the talk, not validated | `30-gateway-httproute.yaml`, `50-cnp-l4.yaml`, `60-cnp-l7.yaml` (Gateway API is off in Cilium) |
+
+Phase 3's demo path — VM, in-guest Tetragon, the kill — was run end to end on
+this cluster on 2026-09-21/22 and is ✅.
 
 **The single most important thing in this document:** the CIDRs, LB range and
 gateway IPs in the original notes came from a **Kind** cluster
@@ -30,7 +33,7 @@ ones across produces policies that silently match nothing.
 |---|---|---|
 | 1 — provision | ~35–45 min | **Yes — do this the night before** |
 | 2 — container demo | ~12 min live | Policies pre-applied, attacks live |
-| 3 — KubeVirt | ~10 min live | VM must be booted in advance (~4 min boot) |
+| 3 — KubeVirt | ~8 min live | **Yes — VM booted in advance, Tetragon pre-installed in the guest** |
 
 Phase 1 is not a stage activity. Provision the day before, verify with the
 pre-flight checklist, and leave the cluster running.
@@ -502,177 +505,160 @@ two systems correlated after the fact.
 
 ---
 
-## Phase 3 — KubeVirt 🚧 *(extended / new — NOT yet fully validated)*
+## Phase 3 — KubeVirt ✅ *(validated 2026-09-21/22 on this cluster)*
 
-> **Everything below this line is a draft.** It has not been run at a talk, and
-> it has not been run on this cluster. Rehearse it end to end before showing
-> it, and be ready to skip it. The Phase 2 material stands on its own.
+**The argument:** network policy follows the workload into a VM; process-level
+enforcement does not. Same attack, same policy, different kernel — so you move
+the sensor up into the guest.
 
-### 3.0 — Before you start: the curl trap
+Every step below was run end to end on this cluster. What is **not** part of
+the talk any more: the Gateway, the HTTPRoute and the L4/L7
+CiliumNetworkPolicies (`30-`, `50-`, `60-`). Those files stay in the repo,
+unused — Cilium has Gateway API off, and the argument above does not need them.
 
-Phase 2's `kill-network-recon-binaries` is **cluster-wide and kills curl**.
-Phase 3 drives its entire demo with curl from `tmp-client`. Run them back to
-back unchanged and every Phase 3 command dies with exit 137, for reasons that
-have nothing to do with KubeVirt.
-
-Pick one:
+### 3.0 — Before you start
 
 ```bash
-# Option A — drop the wide policy before Phase 3 (recommended on stage)
-make unmitigate        # `make kubevirt` does this for you
-
-# Option B — use the namespaced variant from the start of Phase 2 instead
-kubectl apply -f phase2-container-lab/policies/11-kill-network-recon-binaries-namespaced.yaml
+make kubevirt        # KubeVirt v1.9.0 + cloud-init Secret + the VM + tmp-client
 ```
 
-Option A gives the better Phase 2 demo — "I ran nmap in an unrelated namespace
-and it died" lands harder than the scoped version. Option B lets you run both
-phases continuously. Decide during rehearsal, not on stage.
+Prerequisites, all confirmed here:
 
-### 3.1 — Install KubeVirt
+- **Nested virtualisation**: the worker's Ryzen 5 5600G reports `svm` on all 4
+  CPUs, so the VM runs at full speed. `make preflight` checks this.
+- **`make kubevirt` runs `make unmitigate` first.** Phase 2's cluster-wide kill
+  policy SIGKILLs `curl`, which breaks anything driving the VM with curl. In
+  the demo below the kill policies come back on deliberately, at beat 2.
+- **Boot the VM well before you go on stage.** cloud-init installs nginx, nmap,
+  tcpdump *and Tetragon in the guest*. It took ~20–100 s here; assume minutes.
+- **Reaching the guest without a console**, since `virtctl` may not be on your
+  laptop:
+  ```bash
+  VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
+  kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < <your private key>
+  kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP <command>
+  ```
+  The matching **public** key is in `cloud-init/nginx-vm-user-data.yaml`.
 
-```bash
-make kubevirt          # installs KubeVirt, the VM, Service, Gateway and client
-```
+**Reading exit codes in this phase:** `137` = SIGKILL (the policy worked).
+`124` = your own `timeout` expired, i.e. **the process survived**. Over ssh you
+may see `255` (ssh cannot express a signal) or a bash `Killed` line instead —
+run the command as `...; echo exit=$?` inside the guest to see the real code.
 
-Takes several minutes. The script checks for `vmx`/`svm` inside a guest and, if
-nesting is off, prints the `useEmulation: true` fallback. Emulation is slow but
-demos fine — the VM boots in maybe 4 minutes instead of 1.
-
-```console
-$ kubectl -n kubevirt get kv kubevirt
-NAME       AGE   PHASE
-kubevirt   6m    Deployed
-```
-
-### 3.2 — Boot the VM
-
-```bash
-kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml
-kubectl -n kubevirt-demo get vmi -w
-```
-
-**Boot this before you go on stage.** cloud-init has to `apt install nginx`,
-which needs working egress and takes minutes.
+### 3.1 — Beat 1: a VM is just a workload
 
 ```console
 $ kubectl -n kubevirt-demo get vmi
-NAME       AGE   PHASE     IP             NODENAME
-nginx-vm   4m    Running   10.233.65.42   k8s-worker-0-bsides-krk-demo
+NAME       AGE   PHASE     IP              NODENAME
+nginx-vm   10m   Running   10.233.65.148   k8s-worker-0-bsides-krk-demo
+
+$ kubectl -n kubevirt-demo get pods
+virt-launcher-nginx-vm-zt9gs   2/2   Running
 ```
 
-Console access if it misbehaves: `virtctl console nginx-vm -n kubevirt-demo`.
+A normal pod, a normal pod IP, a normal Cilium endpoint. `wget -qO- http://nginx/details`
+from `tmp-client` reaches it through an ordinary Service. (Use `wget`, not
+`curl`, once the kill policies are on.) The guest believes its IP is `10.0.2.2`
+— that is KubeVirt's masquerade NAT inside the launcher pod.
 
-The beat worth making here: `kubectl get pods` shows a `virt-launcher-nginx-vm-*`
-pod with a normal pod IP, a normal Cilium endpoint, and a normal identity. To
-the datapath it is a workload like any other — which is exactly why the same
-policy language works on it.
+### 3.2 — Beat 2: the attack that just died in a container
 
-### 3.3 — Service and Gateway
+Turn Phase 2's enforcement back on, then run the *same* attack in both places:
 
 ```bash
-kubectl apply -f phase3-kubevirt-lab/20-service.yaml
-kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml
-kubectl apply -f phase3-kubevirt-lab/40-tmp-client.yaml
-
-export GATEWAY=$(kubectl -n kubevirt-demo get gateway nginx-gw \
-  -o jsonpath='{.status.addresses[0].value}')
-echo "$GATEWAY"          # expect something in 10.1.1.240-249
+make mitigate     # cluster-wide kill policies, as in Phase 2
 ```
 
-> The original notes show `172.18.255.200`. That was Kind's Docker bridge.
-> **Always read the real address out of the Gateway status** — never hardcode
-> the old one into a slide.
+| Where | Command | Result |
+|---|---|---|
+| Inside the VM | `sudo tcpdump -i any -c 3` | **survives** |
+| In a pod on the same node | `kubectl -n tetragon-demo exec attacker -- tcpdump -i any -c 3` | **exit 137** |
 
-Baseline, everything open:
+Same binary, same policy, same node. Only the kernel differs.
 
-```console
-$ kubectl exec tmp-client -n kubevirt-demo -- curl --fail -s http://nginx/details
-<h1>VMDetails</h1><p>Name: nginx-vm</p><p>IP: 10.0.2.2 </p><p>Locale: LANG=C.UTF-8 ...</p>
+### 3.3 — Beat 3: why the host sensor is blind
 
-$ curl --fail -s http://$GATEWAY/ | head -4
-<!DOCTYPE html>
-<html>
-<head>
-<title>Welcome to nginx!</title>
-```
-
-`10.0.2.2` is the guest's own view of itself behind KubeVirt's `masquerade`
-binding — the VM is NATed inside the virt-launcher pod's netns. Worth pointing
-at: the address the VM believes it has and the address the cluster routes to
-are different, and the policy operates on the latter.
-
-### 3.4 — L4 lockdown
+Stream the host's Tetragon while the attack runs **inside the VM**:
 
 ```bash
-kubectl apply -f phase3-kubevirt-lab/50-cnp-l4.yaml
+kubectl -n kube-system exec <tetragon-pod-on-the-worker> -c tetragon -- tetra getevents -o compact
 ```
 
-Only `tmp-client` and the Gateway may reach the VM, on TCP/80 only. Prove it,
-then immediately show the gap:
+Measured here: **zero** events for the guest's `tcpdump`/`nmap`, and zero from
+`virt-launcher`. The host sees `qemu` sitting there and the pods around it, not
+the processes inside the guest — they never touch the host kernel.
+
+> Careful when you demo this: if a pod runs the same attack in the same window,
+> its events *do* appear and look like guest events. Run the guest attack alone.
+> Also, a pod's `ssh ... tcpdump` command line shows the word "tcpdump" in the
+> host stream — that is the ssh process's argv, not the guest's process.
+
+### 3.4 — Beat 4: move the sensor up
+
+Tetragon is already installed in the guest (cloud-init, same 1.4.0 as the
+cluster), running with **no policies loaded**. Drop in the *same* policy file
+Phase 2 uses:
 
 ```console
-$ kubectl exec tmp-client -n kubevirt-demo -- curl --fail -s http://nginx/secret
-<h1>TOP SECRET</h1><p>flag{ebpf-runtime-security}</p>
+$ sudo /usr/local/bin/load-policy.sh
+policy loaded and hook attached after 4s
+
+$ sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
+exit=137
 ```
 
-**The L4 policy is correct and it is not enough.** At L4, `GET /details` and
-`GET /secret` are both "TCP to port 80" and it cannot tell them apart. That gap
-is the argument for the next slide.
+That script copies `/root/policies/kill-tcpdump.yaml` into
+`/etc/tetragon/tetragon.tp.d/`, restarts the service, and **waits until the
+kprobe is attached** — without that wait the first attack after the restart
+still succeeds for a few seconds and the demo looks broken.
 
-### 3.5 — L7 lockdown
+Note `nmap` still runs in the guest: only the tcpdump policy was loaded there.
+That is a useful detail if someone asks — the guest enforces exactly what you
+gave it, nothing more.
+
+### 3.5 — Beat 5: the catch
+
+Close on the trade-off, not on the fix:
+
+- A host sensor is **outside** the container's reach. An in-guest sensor is
+  **inside** the attacker's blast radius — root in the guest can stop it.
+- So the guest agent gets monitored too (heartbeats; KubeVirt supports vsock
+  as a channel that does not depend on the guest's own networking).
+- The host keeps what it is still authoritative for: **network identity and
+  policy** for the VM, and the **hypervisor boundary** (`virt-launcher`/`qemu`
+  integrity, escape attempts).
+
+### 3.6 — Gotchas found while validating this
+
+- **Tetragon in the guest hits the same kprobe-multi failure as the cluster.**
+  Without `disable-kprobe-multi`, the daemon dies with `Failed to start
+  tetragon ... bpf_multi_kprobe_v61.o ... load program: invalid argument` the
+  moment a policy is dropped in — and the attack "survives" because the sensor
+  is dead, not because the VM protected it. cloud-init writes
+  `/etc/tetragon/tetragon.conf.d/disable-kprobe-multi` for this reason.
+- **The cloud-config is too big to inline.** KubeVirt caps inline `userData` at
+  2048 bytes; this one is ~4.7 KB, so it lives in the `nginx-vm-cloudinit`
+  Secret, built from `cloud-init/nginx-vm-user-data.yaml`. Editing that file
+  changes nothing until you rebuild the Secret **and** restart the VM:
+  ```bash
+  kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
+    --from-file=userdata=phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml \
+    --dry-run=client -o yaml | kubectl apply -f -
+  kubectl -n kubevirt-demo delete vmi nginx-vm      # the VM restarts itself
+  ```
+- **The field is `secretRef`**, not `userDataSecretRef`; the API rejects the latter.
+- **`spec.running` is deprecated** in favour of `runStrategy`. It still works,
+  it just warns on every apply.
+- `make kubevirt` used to abort *after* installing KubeVirt but *before*
+  applying the VM, because installing `virtctl` needs sudo. `SKIP_VIRTCTL=1`
+  skips it, and a failure there no longer kills the run.
+
+### 3.7 — Reset between rehearsals
 
 ```bash
-kubectl delete cnp vm-l4-lockdown -n kubevirt-demo
-kubectl apply -f phase3-kubevirt-lab/60-cnp-l7.yaml
+make kubevirt-clean     # drops the kubevirt-demo namespace; KubeVirt itself stays
+make kubevirt           # rebuilds Secret + VM + client
 ```
-
-> Delete the L4 policy first. Both select the same endpoint and Cilium takes
-> the **union** of what they allow — leave the L4 rule in place and it keeps
-> permitting the exact request the L7 rule exists to drop.
-
-```console
-$ kubectl exec tmp-client -n kubevirt-demo -- curl --fail -s http://nginx/details
-<h1>VMDetails</h1><p>Name: nginx-vm</p><p>IP: 10.0.2.2 </p><p>Locale: LANG=C.UTF-8 ...</p>
-
-$ curl --fail -s http://$GATEWAY/secret --verbose
-> GET /secret HTTP/1.1
-> Host: 10.1.1.240
-< HTTP/1.1 403 Forbidden
-< content-length: 15
-< server: envoy
-The requested URL returned error: 403
-```
-
-Terminal 2:
-
-```
-kubevirt-demo/tmp-client:48482 (ID:2272) -> kubevirt-demo/virt-launcher-nginx-vm-46qhw:80 (ID:27807) http-request DROPPED (HTTP/1.1 GET http://nginx/secret)
-10.233.65.193:37405 (ingress) -> kubevirt-demo/virt-launcher-nginx-vm-46qhw:80 (ID:27807) http-request DROPPED (HTTP/1.1 GET http://172.18.255.200/secret)
-```
-
-Two things to say:
-
-1. **`server: envoy`.** The 403 does not come from nginx. nginx never sees the
-   request — show it by tailing the VM console next to the curl. Enforcement
-   happens below the application, in the datapath, and the VM is not
-   participating in its own defence.
-2. **The path regexes are anchored** (`^/$`, `^/details$`). Cilium matches
-   `path` as a regex, not a literal, so an unanchored `"/"` matches anything
-   containing a slash — including `/secret`. The policy would apply cleanly and
-   allow precisely the request it exists to block. Good "gotcha" slide material.
-
-### 3.6 — What's still unproven in Phase 3
-
-Be honest about this list if asked:
-
-- Nested virt on the Proxmox host has not been confirmed for these guests.
-- `socketLB.hostNamespaceOnly=true` is set for KubeVirt compatibility but that
-  interaction has not been exercised here.
-- The cloud-init `/details` renderer is reconstructed from observed output, not
-  from the original manifest.
-- Gateway API + `l2announcements` on bare metal is a different path from the
-  Kind-based reference lab and has not been run end to end.
 
 ---
 

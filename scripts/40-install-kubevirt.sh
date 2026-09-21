@@ -19,7 +19,16 @@ kubectl apply -f "https://github.com/kubevirt/kubevirt/releases/download/${KUBEV
 # no schedulable node and the error does not say "nested virt" anywhere.
 echo
 echo "[INFO] Checking for hardware virtualisation inside the guests..."
-if ! ssh -o StrictHostKeyChecking=no ubuntu@10.1.1.41 "grep -qE 'vmx|svm' /proc/cpuinfo"; then
+# Checked with kubectl, not ssh: /proc/cpuinfo is not namespaced, so a throwaway
+# pod on the worker reports the node's CPU flags. The old ssh check failed with
+# a misleading "no vmx/svm" whenever the laptop could not reach 10.1.1.41
+# directly -- which is the normal case when kubectl goes through a TCP proxy.
+NESTED=$(kubectl run nested-virt-check-$$ --image=busybox:1.36 --restart=Never --rm -i --quiet \
+  --overrides='{"spec":{"nodeName":"k8s-worker-0-bsides-krk-demo"}}' \
+  --command -- sh -c 'grep -cE "vmx|svm" /proc/cpuinfo' 2>/dev/null | tr -dc '0-9')
+if [ "${NESTED:-0}" -gt 0 ]; then
+  echo "[INFO] Hardware virtualisation available (${NESTED} CPUs report vmx/svm)."
+else
   cat <<'WARN'
 [WARN] No vmx/svm inside the guest. Enable nesting on the Proxmox host:
          echo "options kvm-intel nested=Y" | sudo tee /etc/modprobe.d/kvm-intel.conf
@@ -34,12 +43,20 @@ echo
 echo "[INFO] Waiting for KubeVirt to converge (this takes several minutes)..."
 kubectl -n kubevirt wait kv kubevirt --for condition=Available --timeout=15m
 
-if ! command -v virtctl >/dev/null; then
+# SKIP_VIRTCTL=1 skips the local install. It needs sudo, which has no terminal
+# in an unattended run (`make kubevirt` from a script) and aborts the whole
+# thing AFTER KubeVirt is installed but BEFORE the VM is applied. virtctl is
+# already on the control plane via install-master-deps.yml, and nothing in the
+# talk needs it on the laptop except `virtctl console`.
+if [ "${SKIP_VIRTCTL:-0}" = "1" ]; then
+  echo "[INFO] SKIP_VIRTCTL=1, not touching the local virtctl."
+elif ! command -v virtctl >/dev/null; then
   echo "[INFO] Installing virtctl..."
   curl -sL --fail -o /tmp/virtctl \
     "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64"
-  sudo install -m 0755 /tmp/virtctl /usr/local/bin/virtctl
+  sudo install -m 0755 /tmp/virtctl /usr/local/bin/virtctl || {
+    echo "[WARN] virtctl install failed (needs sudo). Continuing -- it is on the master already."; }
 fi
 
-virtctl version --client
+command -v virtctl >/dev/null && virtctl version --client
 kubectl -n kubevirt get kv kubevirt

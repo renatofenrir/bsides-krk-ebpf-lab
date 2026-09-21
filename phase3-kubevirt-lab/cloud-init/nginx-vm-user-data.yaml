@@ -1,0 +1,141 @@
+#cloud-config
+package_update: true
+packages:
+  - nginx
+  # The Phase 2 toolkit, so the SAME attacks can be run inside
+  # the guest. netshoot's nmap/tcpdump live at /usr/bin; Ubuntu's
+  # tcpdump is /usr/bin/tcpdump too, which is why the policy's
+  # matchBinaries list covers both /usr/bin and /usr/sbin.
+  - nmap
+  - tcpdump
+# Lets the demo reach the guest without a console:
+#   kubectl exec tmp-client -n kubevirt-demo -- ssh -i <key> ubuntu@<vm-pod-ip>
+# Public half only; the private key never lives in this repo.
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFt5ooY0LW7v3IPiedKozdBv/MHNjVzJgogyh9AkMFo8 bsides-vm-demo
+write_files:
+  - path: /etc/nginx/sites-available/default
+    content: |
+      server {
+        listen 80 default_server;
+        root /var/www/html;
+        index index.nginx-debian.html;
+
+        location / {
+          try_files $uri $uri/ =404;
+        }
+
+        # Served without an extension, so nginx would otherwise
+        # hand them out as application/octet-stream and curl
+        # would print nothing useful on stage.
+        location = /details {
+          default_type text/html;
+          try_files /details =404;
+        }
+        location = /secret {
+          default_type text/html;
+          try_files /secret =404;
+        }
+      }
+  - path: /usr/local/bin/render-details.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Rendered at boot rather than baked in, so the IP shown is
+      # the real one the guest ended up with.
+      IP=$(hostname -I | awk '{print $1}')
+      {
+        printf '<h1>VMDetails</h1>'
+        printf '<p>Name: %s</p>' "$(hostname)"
+        printf '<p>IP: %s </p>' "$IP"
+        printf '<p>Locale: %s</p>' "$(locale | tr '\n' ' ')"
+      } > /var/www/html/details
+  - path: /var/www/html/secret
+    content: |
+      <h1>TOP SECRET</h1><p>flag{ebpf-runtime-security}</p>
+  # The guest's copy of Phase 2's kill-tcpdump policy, staged but
+  # NOT loaded: /etc/tetragon/tetragon.tp.d/ starts empty, so the
+  # attack succeeds until the policy is dropped in on stage.
+  # Byte-identical to phase2-container-lab/policies/20-kill-tcpdump.yaml
+  # minus the comments -- keep the two in sync.
+  - path: /root/policies/kill-tcpdump.yaml
+    content: |
+      apiVersion: cilium.io/v1alpha1
+      kind: TracingPolicy
+      metadata:
+        name: "kill-tcpdump"
+      spec:
+        kprobes:
+          - call: "security_socket_create"
+            syscall: false
+            args:
+              - index: 0
+                type: int
+              - index: 1
+                type: int
+              - index: 2
+                type: int
+            selectors:
+              - matchBinaries:
+                  - operator: "In"
+                    values:
+                      - "/usr/sbin/tcpdump"
+                      - "/usr/bin/tcpdump"
+                matchActions:
+                  - action: Sigkill
+  # One-liner the demo runs on stage to load it (beat 4).
+  - path: /usr/local/bin/load-policy.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Move the sensor's policy into place and WAIT until the kernel hook is
+      # actually attached. Without the wait, the first attack after the restart
+      # still succeeds for a few seconds and the demo looks like it failed.
+      set -e
+      cp /root/policies/kill-tcpdump.yaml /etc/tetragon/tetragon.tp.d/
+      systemctl restart tetragon
+      for i in $(seq 1 30); do
+        if journalctl -u tetragon --since "-60s" --no-pager 2>/dev/null \
+             | grep -q "Added kprobe.*security_socket_create"; then
+          if journalctl -u tetragon --since "-60s" --no-pager 2>/dev/null \
+               | grep -q "Failed to start tetragon"; then
+            echo "TETRAGON FAILED TO START -- check: journalctl -u tetragon"; exit 1
+          fi
+          sleep 2
+          echo "policy loaded and hook attached after ${i}s"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "timed out waiting for the hook; check: journalctl -u tetragon"; exit 1
+runcmd:
+  - [ bash, /usr/local/bin/render-details.sh ]
+  - [ systemctl, restart, nginx ]
+  - [ systemctl, enable, nginx ]
+  # --- Tetragon INSIDE the guest -------------------------------
+  # Same version as the cluster's DaemonSet (1.4.0), installed as
+  # a plain systemd service: no Kubernetes in here, policies are
+  # read from /etc/tetragon/tetragon.tp.d/ instead of CRDs.
+  #
+  # Pre-baked on purpose: an apt/GitHub download is not something
+  # to do live on a conference network. It starts with NO policies
+  # loaded, which is exactly the "host sensor can't see in here"
+  # state the demo opens with.
+  - [ mkdir, -p, /etc/tetragon/tetragon.tp.d ]
+  - bash -c 'curl -sL --fail -o /tmp/tetragon.tgz https://github.com/cilium/tetragon/releases/download/v1.4.0/tetragon-v1.4.0-amd64.tar.gz'
+  - bash -c 'tar xf /tmp/tetragon.tgz -C /tmp'
+  - bash -c 'cd /tmp/tetragon-v1.4.0-amd64 && ./install.sh'
+  # Same kprobe-multi problem as the cluster's Tetragon, and it bites here too:
+  # without this the daemon dies with "Failed to start tetragon ...
+  # bpf_multi_kprobe_v61.o ... load program: invalid argument" the moment a
+  # policy is dropped in, and the attack "survives" because the SENSOR is dead,
+  # not because the VM boundary protected it. Verified on this guest
+  # (Ubuntu 24.04, kernel 6.8.0) on 2026-09-21.
+  # Standalone Tetragon reads flags from /etc/tetragon/tetragon.conf.d/, one
+  # file per flag, the file's content being the value.
+  - bash -c 'mkdir -p /etc/tetragon/tetragon.conf.d && echo true > /etc/tetragon/tetragon.conf.d/disable-kprobe-multi'
+  - [ systemctl, enable, tetragon ]
+  - bash -c 'systemctl is-active tetragon || systemctl start tetragon'
+  # Marker the validation script polls for, so "is the guest
+  # ready?" is one HTTP GET instead of guesswork.
+  - bash -c 'echo ready > /var/www/html/guest-ready'
