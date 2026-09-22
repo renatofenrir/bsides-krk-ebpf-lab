@@ -229,8 +229,10 @@ kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 	kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml
 	kubectl apply -f phase3-kubevirt-lab/40-tmp-client.yaml
 	@echo ""
-	@echo "VM is booting -- cloud-init installs nginx, allow ~4 minutes."
-	@echo "Watch:  kubectl -n kubevirt-demo get vmi -w"
+	@echo "VM is booting -- cloud-init installs nginx, nmap, tcpdump and Tetragon."
+	@echo "Measured 20-100s to ready; allow minutes on a cold image pull."
+	@echo "Watch the boot:   virtctl console --timeout=5 nginx-vm -n kubevirt-demo   (Ctrl+] to detach)"
+	@echo "Ready when:       kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/guest-ready"
 
 # --- Rehearsal loop --------------------------------------------------------
 #

@@ -218,9 +218,15 @@ $ cilium status --wait
  \__/¯¯\__/    Hubble Relay:       OK
     \__/       ClusterMesh:        disabled
 
-DaemonSet              cilium             Desired: 3, Ready: 3/3, Available: 3/3
+DaemonSet              cilium             Desired: 2, Ready: 2/2, Available: 2/2
+DaemonSet              cilium-envoy       Desired: 2, Ready: 2/2, Available: 2/2
+Deployment             cilium-operator    Desired: 2, Ready: 2/2, Available: 2/2
+Deployment             hubble-relay       Desired: 1, Ready: 1/1, Available: 1/1
 Deployment             hubble-ui          Desired: 1, Ready: 1/1, Available: 1/1
 ```
+
+(Two of everything: this cluster has two nodes. The `cilium-operator`
+Deployment runs two replicas, one per node.)
 
 ```console
 $ kubectl get nodes
@@ -322,9 +328,10 @@ make events     # streams from the Tetragon pod on the ATTACKER'S node, filtered
 make detect
 ```
 
-⚠️ **RECONSTRUCTED**, but **validated on this cluster on 2026-09-20**: the
-in-cluster API call stayed silent, `nmap -sT` produced four connect events to
-node IPs and an external curl one. The CIDRs in it — `10.233.0.0/18` (services)
+⚠️ **RECONSTRUCTED**, but **validated on this cluster** (2026-09-20, and again
+in a full dry run on 2026-09-22): the in-cluster API call stayed silent, the
+`nmap` below produced **six** connect events — three ports × the two live hosts,
+`.42` does not exist — and the external curl one, for **seven** in total. The CIDRs in it — `10.233.0.0/18` (services)
 and `10.233.64.0/18` (pods) — are pinned in
 `inventory/group-vars/all/all.yml`. If you ever change those, change the policy
 or it flags every in-cluster connection as suspicious.
@@ -486,10 +493,12 @@ tries to `sudo` a local CLI install:
 SKIP_TETRA_CLI=1 make lab-reset
 ```
 
-Two full cycles were run this way on 2026-09-20 with identical results:
-detection gave 5 connect events (4 nmap + 1 external curl, in-cluster call
-silent), and `nmap -sT`, `nmap -sS`, `curl`, `tcpdump` and `nc` all exited 137
-while `wget` kept working.
+Two full cycles were run this way on 2026-09-20, plus a complete dry run of
+both phases on 2026-09-22, all with identical results: the in-cluster call
+stayed silent, detection reported one connect event per scanned port plus one
+for the external curl (5 with the two-port `nmap`, 7 with the three-port one in
+§2.3), and `nmap -sT`, `nmap -sS`, `curl`, `tcpdump` and `nc` all exited 137
+while `wget` kept working. A reset cycle measured 51 s.
 
 ### 2.5 — Hubble, end to end
 
@@ -539,6 +548,17 @@ Prerequisites, all confirmed here:
   kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP <command>
   ```
   The matching **public** key is in `cloud-init/nginx-vm-user-data.yaml`.
+
+**Watching the boot:** `virtctl console --timeout=5 nginx-vm -n kubevirt-demo`
+attaches and waits, so fire it *before* the VM starts and it catches the whole
+boot. `Ctrl+]` detaches. Attaching to an already-booted VM shows nothing until
+you press Enter — the console is a live stream, not a replay.
+
+**`kubectl get gateway` shows `nginx-gw` stuck `Pending` with no address.**
+That is expected and harmless: Gateway API is off in Cilium, so no controller
+ever looks at it. Nothing in the demo uses it. Delete it before the talk if a
+stray listing would distract:
+`kubectl -n kubevirt-demo delete -f phase3-kubevirt-lab/30-gateway-httproute.yaml`
 
 **Reading exit codes in this phase:** `137` = SIGKILL (the policy worked).
 `124` = your own `timeout` expired, i.e. **the process survived**. Over ssh you
@@ -727,4 +747,5 @@ setup, each with a different cause:
 | Gateway IP | `172.18.255.200` | from `CiliumLoadBalancerIPPool`, 10.1.1.240–249 |
 | LB mechanism | Kind + MetalLB | Cilium `l2announcements` (no MetalLB) |
 | Cilium install | `cilium install --set ...` | same, plus `k8sServiceHost` and `k8sClientRateLimit` |
-| TracingPolicies | 3, all validated | 1 verbatim, 2 reconstructed |
+| TracingPolicies | 3, all validated | 1 verbatim, 2 reconstructed — **all three run on this cluster 2026-09-20/22** |
+| VM section | none | Phase 3: VM + in-guest Tetragon, validated 2026-09-21/22 |
