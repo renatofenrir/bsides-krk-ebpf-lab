@@ -666,13 +666,21 @@ Expect kubectl itself to print `command terminated with exit code 137`, then
 no wrapper needed).
 
 **Terminal 3** — the identical attack, typed directly at the guest's console
-(you're already logged in from §3.0):
+(you're already logged in from §3.0). Deliberately **no `-c`** here — see the
+note below:
 ```
-sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
+sudo timeout 6 tcpdump -i any; echo exit=$?
 ```
-Expect `exit=124` (timeout fired — tcpdump ran the full 6 s and survived; a
-plain, un-timed `tcpdump` also survives, `timeout` just bounds it for the
-demo clock).
+Expect `exit=124` — `timeout` is what stops it, 6 s later, because nothing in
+the guest kernel does.
+
+> ⚠️ **Don't add `-c 3` back on this one.** With a packet count, `tcpdump`
+> races `timeout`: the guest's own ARP/DNS chatter usually delivers 3 packets
+> in well under 6 s, so `tcpdump` exits **0** on its own before `timeout` ever
+> fires — a real, measured outcome, not a mistake if you see it. Dropping `-c`
+> removes the race: nothing but the 6 s deadline can end it, so `exit=124` is
+> the only possible result. Either way the number that matters is what's
+> **absent** — `137` never appears, because nothing killed it.
 
 | Where | Terminal | Result |
 |---|---|---|
@@ -724,7 +732,9 @@ Expect: `policy loaded and hook attached after ~4s`.
 ```
 sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
 ```
-Expect: `exit=137` — now killed inside the guest too.
+Expect: `exit=137` — now killed inside the guest too. (`-c 3` is fine to keep
+here, unlike beat 2: the kill fires at `security_socket_create`, before any
+packet is ever captured, so there's no race for a count to win.)
 
 That script copies `/root/policies/kill-tcpdump.yaml` into
 `/etc/tetragon/tetragon.tp.d/`, restarts the service, and **waits until the
@@ -783,6 +793,14 @@ Close on the trade-off, not on the fix:
   building the Secret, and refuses to run if the variable is unset. "Login
   incorrect" means the running VM was built with a different value (or before
   this existed) — `make kubevirt-reset` with the variable exported fixes it.
+- **Beat 2's guest `tcpdump` raced its own `-c 3` against `timeout 6`.**
+  Measured 2026-09-23: the guest's ambient ARP/DNS traffic delivered 3 packets
+  in well under 6 s, so `tcpdump` hit its count and exited **0** on its own —
+  a real "survived" result, but not the `exit=124` the guide predicted, and
+  confusing if you're not expecting two valid outcomes. Fixed by dropping `-c`
+  from that one command so `timeout` is unconditionally what ends it. Beat 4's
+  `-c 3` doesn't have this problem — the kill there fires at
+  `security_socket_create`, before any packet exists to count.
   `ssh_pwauth: false` keeps sshd key-only regardless.
 
 ### 3.7 — Reset between rehearsals
