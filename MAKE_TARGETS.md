@@ -257,6 +257,9 @@ Events are per node, so streaming from the wrong pod shows nothing. Fails with a
 ### `make events-all`
 `kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact` — one arbitrary node, unfiltered. Noisy; the old behaviour of `make events`.
 
+### `make events-vm`
+Phase 3 beat 3's version of `make events`: resolves `nginx-vm`'s node from `kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}'`, finds the Tetragon pod on that node, then streams it unfiltered (no `--pod` filter — the guest's processes never show up as a Kubernetes pod for Tetragon to filter by; that absence is the point of beat 3). Fails with a clear message if `nginx-vm` is absent.
+
 ### `make status`
 `ON_MASTER "cilium status --brief"`, then `kubectl get nodes -o wide`, `kubectl get tracingpolicies`, `kubectl -n kubevirt-demo get vmi`. All best-effort.
 

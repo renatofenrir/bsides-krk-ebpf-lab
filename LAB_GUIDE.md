@@ -541,13 +541,25 @@ Prerequisites, all confirmed here:
 - **Boot the VM well before you go on stage.** cloud-init installs nginx, nmap,
   tcpdump *and Tetragon in the guest*. It took ~20–100 s here; assume minutes.
 - **Reaching the guest without a console**, since `virtctl` may not be on your
-  laptop:
+  laptop. Run this block **once**, in the terminal you'll present from — every
+  guest command in beats 2 and 4 below is built on it:
   ```bash
-  VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
-  kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < <your private key>
-  kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP <command>
+  export VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
+  kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < /path/to/your/private/key
+  vm() { kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP "$* ; echo exit=\$?"; }
   ```
-  The matching **public** key is in `cloud-init/nginx-vm-user-data.yaml`.
+  `/path/to/your/private/key` is the **one** manual substitution in this whole
+  guide — the matching **public** key is baked into
+  `cloud-init/nginx-vm-user-data.yaml` (comment `bsides-vm-demo`), the private
+  half is deliberately never committed. Do this substitution and confirm the
+  key works **before** you're on stage, not during; if you don't have that
+  key, see the gotchas in §3.6 for how to swap in a new one.
+
+  `vm` wraps the ssh call and appends `; echo exit=$?` **inside** the remote
+  shell, so the exit code you see is always the guest process's real one —
+  never ssh's own `255` for "the guest process was killed", which is the trap
+  called out below. From here on, every VM command in this guide is just
+  `vm <command>`, e.g. `vm sudo tcpdump -i any -c 3`.
 
 **Watching the boot:** `virtctl console --timeout=5 nginx-vm -n kubevirt-demo`
 attaches and waits, so fire it *before* the VM starts and it catches the whole
@@ -583,37 +595,86 @@ $ kubectl -n kubevirt-demo get pods
 virt-launcher-nginx-vm-zt9gs   2/2   Running
 ```
 
-A normal pod, a normal pod IP, a normal Cilium endpoint. `wget -qO- http://nginx/details`
-from `tmp-client` reaches it through an ordinary Service. (Use `wget`, not
-`curl`, once the kill policies are on.) The guest believes its IP is `10.0.2.2`
-— that is KubeVirt's masquerade NAT inside the launcher pod.
+A normal pod, a normal pod IP, a normal Cilium endpoint.
+
+```bash
+kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/details
+```
+
+reaches it through an ordinary Service. (Use `wget`, not `curl`, once the kill
+policies are on — Phase 2's `mitigate` SIGKILLs `curl` cluster-wide.) The guest
+believes its IP is `10.0.2.2` — that is KubeVirt's masquerade NAT inside the
+launcher pod.
 
 ### 3.2 — Beat 2: the attack that just died in a container
 
-Turn Phase 2's enforcement back on, then run the *same* attack in both places:
+Turn Phase 2's enforcement back on:
 
 ```bash
 make mitigate     # cluster-wide kill policies, as in Phase 2
 ```
 
-| Where | Command | Result |
-|---|---|---|
-| Inside the VM | `sudo tcpdump -i any -c 3` | **survives** |
-| In a pod on the same node | `kubectl -n tetragon-demo exec attacker -- tcpdump -i any -c 3` | **exit 137** |
+**Prove it's actually loaded before you run either attack.** `make mitigate`
+only *applies* the TracingPolicy objects — it does not confirm the kprobe is
+attached, and a policy can sit there "applied" but inert (see §3.6 and the
+`preflight` gotcha). Two checks, ~15 s apart:
+
+```bash
+kubectl get tracingpolicy
+# expect: kill-network-recon-binaries, kill-tcpdump   (both cluster-wide, no namespace)
+
+kubectl -n kube-system logs ds/tetragon -c tetragon --tail=50 | grep -i tcpdump
+# expect a line like "... msg=\"Added kprobe\" ... symbol=\"security_socket_create\" ..."
+# nothing? wait a few more seconds -- the hook takes a moment to attach.
+```
+
+Now run the *same* attack in both places:
+
+```bash
+# 1. In a pod on the node the VM is running on -- proves the kill policy is live:
+kubectl -n tetragon-demo exec attacker -- tcpdump -i any -c 3; echo exit=$?
+# expect: kubectl itself prints "command terminated with exit code 137", exit=137
+# (same as §2.4 -- kubectl detects the signal and reports it directly, no wrapper needed)
+
+# 2. The identical attack, inside the VM (uses the `vm` helper from §3.0):
+vm sudo timeout 6 tcpdump -i any -c 3
+# expect: exit=124 (timeout fired -- tcpdump ran the full 6s and survived)
+# (a plain, un-timed tcpdump also survives; timeout just bounds it for the demo clock)
+```
+
+| Where | Result |
+|---|---|
+| pod (`attacker`) | `exit=137` — killed |
+| VM (`nginx-vm`) | `exit=124` — survives |
 
 Same binary, same policy, same node. Only the kernel differs.
 
 ### 3.3 — Beat 3: why the host sensor is blind
 
-Stream the host's Tetragon while the attack runs **inside the VM**:
+**Terminal 2** — stream the host's Tetragon on the VM's own node:
 
 ```bash
-kubectl -n kube-system exec <tetragon-pod-on-the-worker> -c tetragon -- tetra getevents -o compact
+make events-vm
+```
+
+That resolves `nginx-vm`'s node, finds the Tetragon pod running there, and
+streams it — same pattern as Phase 2's `make events`, just keyed to the VM
+instead of the attacker pod. (Equivalent by hand:
+`VMNODE=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}')`,
+then find the Tetragon pod with that `nodeName` and `exec ... tetra getevents -o compact`
+into it.)
+
+**Terminal 1** — with the stream running, trigger the attack inside the guest:
+
+```bash
+vm sudo tcpdump -i any -c 3
+vm sudo nmap -sT -p 22,80 localhost
 ```
 
 Measured here: **zero** events for the guest's `tcpdump`/`nmap`, and zero from
 `virt-launcher`. The host sees `qemu` sitting there and the pods around it, not
-the processes inside the guest — they never touch the host kernel.
+the processes inside the guest — they never touch the host kernel. `Ctrl+C`
+stops the stream in Terminal 2 once you've made the point.
 
 > Careful when you demo this: if a pod runs the same attack in the same window,
 > its events *do* appear and look like guest events. Run the guest attack alone.
@@ -624,14 +685,14 @@ the processes inside the guest — they never touch the host kernel.
 
 Tetragon is already installed in the guest (cloud-init, same 1.4.0 as the
 cluster), running with **no policies loaded**. Drop in the *same* policy file
-Phase 2 uses:
+Phase 2 uses (still using the `vm` helper from §3.0):
 
-```console
-$ sudo /usr/local/bin/load-policy.sh
-policy loaded and hook attached after 4s
+```bash
+vm sudo /usr/local/bin/load-policy.sh
+# expect: policy loaded and hook attached after ~4s
 
-$ sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
-exit=137
+vm sudo timeout 6 tcpdump -i any -c 3
+# expect: exit=137 -- now killed inside the guest too
 ```
 
 That script copies `/root/policies/kill-tcpdump.yaml` into
@@ -640,6 +701,12 @@ kprobe is attached** — without that wait the first attack after the restart
 still succeeds for a few seconds and the demo looks broken.
 
 Note `nmap` still runs in the guest: only the tcpdump policy was loaded there.
+
+```bash
+vm sudo nmap -sT -p 22,80 localhost
+# expect: exit=0 -- nmap was never targeted, so it's unaffected
+```
+
 That is a useful detail if someone asks — the guest enforces exactly what you
 gave it, nothing more.
 

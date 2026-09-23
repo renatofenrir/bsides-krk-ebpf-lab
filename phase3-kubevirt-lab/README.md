@@ -53,11 +53,19 @@ cloud-init installs and stages, so nothing slow or network-dependent happens on 
 
 ## Reaching the guest (no console needed)
 
+Once, per terminal session:
+
 ```bash
-VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
-kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < <private key>
-kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP 'sudo ...'
+export VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
+kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < /path/to/private/key
+vm() { kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP "$* ; echo exit=\$?"; }
 ```
+
+then every guest command is `vm <command>`, e.g. `vm sudo tcpdump -i any -c 3`.
+The trailing `; echo exit=$?` runs *inside* the guest's shell, so the exit code
+printed is always the real one — never ssh's own `255` for "the remote process
+was killed by a signal". Full walkthrough with expected exit codes:
+[`LAB_GUIDE.md` §3](../LAB_GUIDE.md#30--before-you-start).
 
 The **public** key is in the cloud-config; the private half is never committed.
 `virtctl console nginx-vm -n kubevirt-demo` also works if you have virtctl (the
