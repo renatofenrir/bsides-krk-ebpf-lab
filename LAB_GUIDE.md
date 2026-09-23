@@ -698,8 +698,16 @@ make events-vm
 ```
 
 That resolves `nginx-vm`'s node, finds the Tetragon pod running there, and
-streams it — same pattern as Phase 2's `make events`, just keyed to the VM
-instead of the attacker pod.
+streams it scoped with `--pod` to the VM's own `virt-launcher` pod — same
+pattern as Phase 2's `make events`, just keyed to the VM instead of the
+attacker pod.
+
+**What "working" looks like: near-total silence.** Terminal 2 should sit
+almost empty. If you instead see a wall of `nodelocaldns`, `kubelet` or other
+`kube-system` lines, you ran plain `tetra getevents` unscoped — `make
+events-vm` filters those out on purpose (see `MAKE_TARGETS.md`). Don't chase
+that noise if you ever see it; it's unrelated host chatter, not a sign
+anything's broken.
 
 **Terminal 3** — with the stream running, type the attack directly at the
 guest's console:
@@ -709,9 +717,10 @@ sudo tcpdump -i any -c 3
 sudo nmap -sT -p 22,80 localhost
 ```
 
-Measured here: **zero** events for the guest's `tcpdump`/`nmap`, and zero from
-`virt-launcher`. The host sees `qemu` sitting there and the pods around it, not
-the processes inside the guest — they never touch the host kernel. `Ctrl+C`
+**Expect Terminal 2 to print nothing at all for these two commands.** That
+silence — scoped to the exact pod running your VM, not "zero events somewhere
+in a noisy stream" — *is* the beat: the host sees `qemu` sitting there, not the
+processes inside the guest, because they never touch the host kernel. `Ctrl+C`
 stops the stream in Terminal 2 once you've made the point.
 
 > Careful when you demo this: if a pod runs the same attack in the same window,

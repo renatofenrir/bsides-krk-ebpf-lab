@@ -264,7 +264,7 @@ Events are per node, so streaming from the wrong pod shows nothing. Fails with a
 `kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact` — one arbitrary node, unfiltered. Noisy; the old behaviour of `make events`.
 
 ### `make events-vm`
-Phase 3 beat 3's version of `make events`: resolves `nginx-vm`'s node from `kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}'`, finds the Tetragon pod on that node, then streams it unfiltered (no `--pod` filter — the guest's processes never show up as a Kubernetes pod for Tetragon to filter by; that absence is the point of beat 3). Fails with a clear message if `nginx-vm` is absent.
+Phase 3 beat 3's version of `make events`: resolves `nginx-vm`'s node from `kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}'`, finds the Tetragon pod on that node, and streams it scoped with `--pod` to `nginx-vm`'s `virt-launcher` pod (found via its `kubevirt.io/vm=nginx-vm` label, set in `10-nginx-vm.yaml`). Unscoped, the stream is drowned in unrelated kube-system noise (`nodelocaldns`, kubelet's `iptables … KUBE-KUBELET-CANARY` check, …) that has nothing to do with the VM and makes "zero events for the guest" hard to trust by eye; scoped, an empty stream during the guest attack is unambiguous. Fails with a clear message if `nginx-vm` or its launcher pod is absent.
 
 ### `make status`
 `ON_MASTER "cilium status --brief"`, then `kubectl get nodes -o wide`, `kubectl get tracingpolicies`, `kubectl -n kubevirt-demo get vmi`. All best-effort.

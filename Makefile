@@ -378,18 +378,26 @@ events-all: ## Stream Tetragon events from every node, unfiltered (noisy)
 	@kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
 
 .PHONY: events-vm
-events-vm: ## Phase 3 beat 3 -- stream Tetragon events from nginx-vm's own node
+events-vm: ## Phase 3 beat 3 -- stream Tetragon events scoped to nginx-vm's virt-launcher pod
 	@# Same reasoning as `events`: Tetragon is per node, and the host agent that
 	@# matters here is the one on whichever node the VM landed on -- not
-	@# whatever `ds/tetragon` happens to pick.
+	@# whatever `ds/tetragon` happens to pick. Also scoped with --pod to the
+	@# virt-launcher pod itself (labelled kubevirt.io/vm=nginx-vm in
+	@# 10-nginx-vm.yaml): unscoped, the stream is drowned in unrelated
+	@# kube-system noise (nodelocaldns, kubelet's iptables canary, ...) that
+	@# has nothing to do with the VM and makes "zero events" hard to trust by
+	@# eye. Scoped, a truly empty stream during the guest attack is the point.
 	@echo "[INFO] Running: kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}'"
 	@node=$$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}' 2>/dev/null); \
 	if [ -z "$$node" ]; then echo "nginx-vm not found -- run 'make kubevirt' first"; exit 1; fi; \
+	echo "[INFO] Running: kubectl -n kubevirt-demo get pods -l kubevirt.io/vm=nginx-vm -o jsonpath='{.items[0].metadata.name}'"; \
+	launcher=$$(kubectl -n kubevirt-demo get pods -l kubevirt.io/vm=nginx-vm -o jsonpath='{.items[0].metadata.name}' 2>/dev/null); \
+	if [ -z "$$launcher" ]; then echo "virt-launcher pod for nginx-vm not found -- run 'make kubevirt' first"; exit 1; fi; \
 	echo "[INFO] Running: kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon --field-selector spec.nodeName=$$node"; \
 	pod=$$(kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon \
 	        --field-selector spec.nodeName=$$node -o jsonpath='{.items[0].metadata.name}'); \
-	echo "[INFO] Running: kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact"; \
-	kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact
+	echo "[INFO] Running: kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact --pod $$launcher"; \
+	kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact --pod $$launcher
 
 .PHONY: status
 status: ## Where is everything?
