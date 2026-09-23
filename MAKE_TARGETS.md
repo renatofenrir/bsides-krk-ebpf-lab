@@ -185,6 +185,7 @@ At a glance:
 | `make lab-reset` | the above, then redeploys | Tetragon, cluster |
 | `make lab-purge` | the above plus Tetragon | cluster |
 | `make kubevirt-clean` | Phase 3 namespace and policies | KubeVirt |
+| `make kubevirt-reset` | the above, then redeploys | KubeVirt |
 
 ⚠️ `make reset` is **not** part of this group: it wipes the whole Kubernetes
 install via Kubespray. See [Teardown](#teardown).
@@ -211,6 +212,12 @@ SKIP_TETRA_CLI=1 make lab-reset && make detect    # attacks… → make mitigate
 ### `make kubevirt-clean`
 `kubectl delete namespace kubevirt-demo --ignore-not-found`, then waits up to 300 s for it to go. Removes the VM, Service, Gateway, client and both CiliumNetworkPolicies. KubeVirt itself stays installed.
 
+### `make kubevirt-reset`
+`kubevirt-clean` then `kubevirt`. The Phase 3 rehearsal loop, parallel to `lab-reset`:
+```bash
+make kubevirt-reset && make kubevirt-ready && make kubevirt-test
+```
+
 ---
 
 ## Phase 3 🚧
@@ -221,6 +228,20 @@ Depends on `unmitigate` (Phase 2's kill policy would SIGKILL Phase 3's curls), t
 2. `kubectl apply -f` each of `10-nginx-vm.yaml`, `20-service.yaml`, `30-gateway-httproute.yaml`, `40-tmp-client.yaml`.
 
 The VM then needs ~4 min for cloud-init. The L4/L7 policies are applied by hand during the demo. See `phase3-kubevirt-lab/README.md` — the Gateway half is currently inert because Cilium has Gateway API off.
+
+### `make kubevirt-ready`
+Blocks instead of guessing: `kubectl wait` for `tmp-client`, then polls
+`wget -qO- http://nginx/guest-ready` from inside it every 5 s (up to 5 min)
+until cloud-init writes the marker file. Replaces eyeballing the boot on the
+console. Exits 1 with a hint to check `virtctl console` if it times out.
+
+### `make kubevirt-test`
+One-shot check of both access paths, so the empty Gateway address reads as an
+expected result instead of a dead end mid-demo:
+```bash
+kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/details   # works
+kubectl -n kubevirt-demo get gateway nginx-gw                                # stays Pending, no address
+```
 
 ---
 

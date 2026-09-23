@@ -35,6 +35,11 @@ Every step here was run on this cluster. Full runbook with expected output:
 Secret from the file above, and applies `10`, `20`, `30`, `40`. Applying `30`
 is harmless: with Gateway API off it simply does nothing.
 
+`make kubevirt-ready` blocks until cloud-init has actually finished (polls
+`/guest-ready`), and `make kubevirt-test` checks both access paths in one
+shot — the Service (works) and the Gateway (stays `Pending`, no address —
+expected, not a bug).
+
 ## What's in the guest, and why it's pre-baked
 
 cloud-init installs and stages, so nothing slow or network-dependent happens on stage:
@@ -81,6 +86,14 @@ control plane does).
 - **`spec.running` is deprecated** in favour of `runStrategy`; it still works.
 
 ## Reset between rehearsals
+
+```bash
+make kubevirt-reset    # kubevirt-clean + kubevirt in one shot
+make kubevirt-ready    # blocks until cloud-init is done
+make kubevirt-test     # Service works; Gateway stays Pending (expected)
+```
+
+Or step by step:
 
 ```bash
 make kubevirt-clean    # drops the kubevirt-demo namespace; KubeVirt stays installed

@@ -556,9 +556,16 @@ you press Enter — the console is a live stream, not a replay.
 
 **`kubectl get gateway` shows `nginx-gw` stuck `Pending` with no address.**
 That is expected and harmless: Gateway API is off in Cilium, so no controller
-ever looks at it. Nothing in the demo uses it. Delete it before the talk if a
-stray listing would distract:
+ever looks at it. Nothing in the demo uses it. `make kubevirt-test` checks both
+paths in one shot — Service works, Gateway stays `Pending` — so this doesn't
+read as a broken run mid-rehearsal (re-confirmed empty on 2026-09-23: `export
+GATEWAY=$(kubectl -n kubevirt-demo get gateway nginx-gw -o
+jsonpath='{.status.addresses[0].value}')` prints nothing, by design). Delete
+the Gateway before the talk if a stray listing would distract:
 `kubectl -n kubevirt-demo delete -f phase3-kubevirt-lab/30-gateway-httproute.yaml`
+
+**Waiting for the guest:** `make kubevirt-ready` polls `/guest-ready` from
+`tmp-client` instead of eyeballing the console.
 
 **Reading exit codes in this phase:** `137` = SIGKILL (the policy worked).
 `124` = your own `timeout` expired, i.e. **the process survived**. Over ssh you
@@ -676,9 +683,13 @@ Close on the trade-off, not on the fix:
 ### 3.7 — Reset between rehearsals
 
 ```bash
-make kubevirt-clean     # drops the kubevirt-demo namespace; KubeVirt itself stays
-make kubevirt           # rebuilds Secret + VM + client
+make kubevirt-reset     # kubevirt-clean + kubevirt in one shot
+make kubevirt-ready     # blocks until cloud-init is done
+make kubevirt-test      # Service works; Gateway stays Pending (expected)
 ```
+
+Or step by step: `make kubevirt-clean` (drops the `kubevirt-demo` namespace;
+KubeVirt itself stays) then `make kubevirt` (rebuilds Secret + VM + client).
 
 ---
 

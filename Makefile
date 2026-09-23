@@ -6,6 +6,15 @@
 # Everything runs in containers -- the same Kubespray and Terraform images the
 # prod pipeline uses -- so the only hard dependencies on the laptop are docker,
 # ansible and ssh.
+#
+# Every target below echoes "[INFO] Running: <command>" immediately before it
+# runs that command, and every such command line is prefixed `@` so Make's own
+# default echo doesn't duplicate it. This is deliberate: on stage, the audience
+# only sees `make <target>` typed at the prompt -- without this, what actually
+# executes (which kubectl/terraform/ansible call, against what) is invisible.
+# The two `tf`/`kubespray` container macros embed real secrets (MinIO/Proxmox
+# credentials) in their docker invocation, so their targets print a REDACTED
+# description instead of the literal command -- never echo those macros raw.
 # ===========================================================================
 
 SHELL             := /bin/bash
@@ -38,6 +47,10 @@ TF_INIT_ARGS := -backend-config=access_key=$(AWS_ACCESS_KEY_ID) \
 
 # Run terraform as the invoking user so the working tree does not end up
 # root-owned. Prod's CI chowns afterwards instead; locally this is tidier.
+#
+# NEVER echo this macro's expansion: it inlines AWS_SECRET_ACCESS_KEY and
+# TF_VAR_pm_password in plain text. Targets that use it print a redacted
+# "[INFO] Running:" description by hand instead.
 define tf
 	docker run --rm \
 	  -u "$$(id -u):$$(id -g)" \
@@ -52,7 +65,9 @@ define tf
 	  --entrypoint sh $(TF_IMG) -c '$(2)'
 endef
 
-# Kubespray, with inventory and group_vars mounted read-only.
+# Kubespray, with inventory and group_vars mounted read-only. No secret VALUES
+# are inlined here (SSH_KEY is a file path, mounted rather than embedded), so
+# unlike `tf` this one is safe to echo literally.
 define kubespray
 	docker run --rm \
 	  -v "$(PWD)/inventory/inventory.ini:/kubespray/inventory/inventory.ini:ro" \
@@ -91,27 +106,32 @@ up: vms cluster untaint kubeconfig crds cilium lb components ## Full build: VMs 
 
 .PHONY: plan
 plan: ## terraform plan for the VMs (read-only, safe)
-	$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform plan)
+	@echo "[INFO] Running: terraform plan (vms/, containerized via $(TF_IMG))"
+	@$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform plan)
 
 .PHONY: vms
 vms: ## Create the two Proxmox VMs
-	$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve)
-	@echo "[INFO] Waiting for SSH on both nodes..."
-	$(ANSIBLE) -i inventory/inventory.ini all -m wait_for_connection \
+	@echo "[INFO] Running: terraform apply -auto-approve (vms/, containerized via $(TF_IMG))"
+	@$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve)
+	@echo "[INFO] Running: ansible wait_for_connection (all hosts, up to 300s)"
+	@$(ANSIBLE) -i inventory/inventory.ini all -m wait_for_connection \
 	  -a "timeout=300 sleep=5 delay=10" -e "ansible_user=ubuntu ansible_become=yes"
-	@echo "[INFO] Waiting for cloud-init..."
-	$(ANSIBLE) -i inventory/inventory.ini all -m shell -a "cloud-init status --wait" \
+	@echo "[INFO] Running: ansible shell 'cloud-init status --wait' (all hosts)"
+	@$(ANSIBLE) -i inventory/inventory.ini all -m shell -a "cloud-init status --wait" \
 	  -e "ansible_user=ubuntu ansible_become=yes"
 
 .PHONY: deps
 deps: ## Install helm/cilium/hubble/tetra/virtctl on the control plane
-	$(ANSIBLE_PLAYBOOK) -i inventory/inventory.ini -l kube_control_plane \
+	@echo "[INFO] Running: ansible-playbook install-master-deps.yml (kube_control_plane)"
+	@$(ANSIBLE_PLAYBOOK) -i inventory/inventory.ini -l kube_control_plane \
 	  --user=ubuntu -e 'ansible_python_interpreter=/usr/bin/python3' install-master-deps.yml
 
 .PHONY: cluster
 cluster: deps ## Bootstrap Kubernetes with Kubespray (no CNI, no kube-proxy)
-	$(call kubespray,cluster.yml)
-	$(ON_MASTER) "mkdir -p /home/ubuntu/.kube && cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config && chown -R ubuntu:ubuntu /home/ubuntu/.kube"
+	@echo "[INFO] Running: Kubespray cluster.yml (containerized via $(KUBESPRAY_IMG); 20-30 min)"
+	@$(call kubespray,cluster.yml)
+	@echo "[INFO] Running: copy /etc/kubernetes/admin.conf to ubuntu's kubeconfig (control plane)"
+	@$(ON_MASTER) "mkdir -p /home/ubuntu/.kube && cp /etc/kubernetes/admin.conf /home/ubuntu/.kube/config && chown -R ubuntu:ubuntu /home/ubuntu/.kube"
 	@echo ""
 	@echo "[INFO] Nodes will read NotReady until Cilium is installed. Expected."
 
@@ -123,17 +143,21 @@ scale: ## Join a newly-added node (Kubespray scale.yml, not a full re-run)
 	@# scale.yml rather than cluster.yml on purpose -- cluster.yml re-runs every
 	@# role against every node, including the control plane, which on a live
 	@# demo cluster is a long way to go for one extra worker.
-	$(call kubespray,scale.yml)
-	$(ON_MASTER) "kubectl get nodes -o wide"
+	@echo "[INFO] Running: Kubespray scale.yml (containerized via $(KUBESPRAY_IMG))"
+	@$(call kubespray,scale.yml)
+	@echo "[INFO] Running: kubectl get nodes -o wide (via control plane)"
+	@$(ON_MASTER) "kubectl get nodes -o wide"
 
 .PHONY: untaint
 untaint: ## Make the control plane schedulable (two-node cluster needs this)
-	$(ON_MASTER) "kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true"
+	@echo "[INFO] Running: kubectl taint nodes --all node-role.kubernetes.io/control-plane- (via control plane)"
+	@$(ON_MASTER) "kubectl taint nodes --all node-role.kubernetes.io/control-plane- || true"
 
 .PHONY: kubeconfig
 kubeconfig: ## Pull the kubeconfig to the laptop under its own context
 	@mkdir -p $(HOME)/.kube
-	ssh -o StrictHostKeyChecking=no ubuntu@$(MASTER_IP) \
+	@echo "[INFO] Running: ssh ubuntu@$(MASTER_IP) sudo cat /etc/kubernetes/admin.conf"
+	@ssh -o StrictHostKeyChecking=no ubuntu@$(MASTER_IP) \
 	  "sudo cat /etc/kubernetes/admin.conf" > $(HOME)/.kube/bsides-lab.conf
 	@chmod 600 $(HOME)/.kube/bsides-lab.conf
 	@# Point at the node IP: with kube-proxy removed the ClusterIP is not
@@ -154,11 +178,13 @@ crds: ## Gateway API CRDs (same v1.5.1 as prod; Cilium has Gateway API off)
 	@# components state, before the thing that depends on it exists. The rest of
 	@# the stack (metrics-server, local-path) would just sit Pending this early,
 	@# because there is still no CNI -- so it waits for `make components`.
-	$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve -target=module.gateway_api_crds -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
+	@echo "[INFO] Running: terraform apply -target=module.gateway_api_crds (components/, containerized via $(TF_IMG))"
+	@$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve -target=module.gateway_api_crds -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
 
 .PHONY: cilium
 cilium: ## Install Cilium with the lab's flag set, from the control plane
-	$(ON_MASTER) "cilium install --version $(CILIUM_VERSION) \
+	@echo "[INFO] Running: cilium install --version $(CILIUM_VERSION) [lab flag set] (via control plane)"
+	@$(ON_MASTER) "cilium install --version $(CILIUM_VERSION) \
 	  --set cluster.name=default \
 	  --set ipam.mode=kubernetes \
 	  --set kubeProxyReplacement=true \
@@ -170,19 +196,23 @@ cilium: ## Install Cilium with the lab's flag set, from the control plane
 	  --set k8sServicePort=6443 \
 	  --set k8sClientRateLimit.qps=50 \
 	  --set k8sClientRateLimit.burst=200"
-	$(ON_MASTER) "cilium status --wait"
+	@echo "[INFO] Running: cilium status --wait (via control plane)"
+	@$(ON_MASTER) "cilium status --wait"
 
 .PHONY: lb
 lb: ## Apply the LoadBalancer IP pool and L2 announcement policy
-	./scripts/25-cilium-lb-ipam.sh
+	@echo "[INFO] Running: scripts/25-cilium-lb-ipam.sh"
+	@./scripts/25-cilium-lb-ipam.sh
 
 .PHONY: components
 components: ## Apply the add-on stack (Gateway API CRDs, metrics-server, local-path, CoreDNS)
-	$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
+	@echo "[INFO] Running: terraform apply (components/, containerized via $(TF_IMG))"
+	@$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform apply -auto-approve -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
 
 .PHONY: components-plan
 components-plan: ## terraform plan for the add-on stack
-	$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform plan -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
+	@echo "[INFO] Running: terraform plan (components/, containerized via $(TF_IMG))"
+	@$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform plan -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
 
 # ---------------------------------------------------------------------------
 # The lab itself
@@ -190,49 +220,86 @@ components-plan: ## terraform plan for the add-on stack
 
 .PHONY: lab
 lab: tetragon ## Deploy Phase 2: Tetragon + attacker + victim
-	kubectl apply -f phase2-container-lab/attack/netshoot.yaml
-	kubectl -n tetragon-demo wait --for=condition=ready pod --all --timeout=180s
+	@echo "[INFO] Running: kubectl apply -f phase2-container-lab/attack/netshoot.yaml"
+	@kubectl apply -f phase2-container-lab/attack/netshoot.yaml
+	@echo "[INFO] Running: kubectl -n tetragon-demo wait --for=condition=ready pod --all --timeout=180s"
+	@kubectl -n tetragon-demo wait --for=condition=ready pod --all --timeout=180s
 	@echo ""
 	@echo "Ready. Detection policy:  make detect"
 	@echo "Then mitigation:          make mitigate"
 
 .PHONY: tetragon
 tetragon: ## Install Tetragon
-	./scripts/30-install-tetragon.sh
+	@echo "[INFO] Running: scripts/30-install-tetragon.sh"
+	@./scripts/30-install-tetragon.sh
 
 .PHONY: detect
 detect: ## Phase 2.3 -- apply the detection TracingPolicy
-	kubectl apply -f phase2-container-lab/policies/00-monitor-outside-cluster-cidr.yaml
+	@echo "[INFO] Running: kubectl apply -f phase2-container-lab/policies/00-monitor-outside-cluster-cidr.yaml"
+	@kubectl apply -f phase2-container-lab/policies/00-monitor-outside-cluster-cidr.yaml
 
 .PHONY: mitigate
 mitigate: ## Phase 2.4 -- apply the SIGKILL TracingPolicies
-	kubectl apply -f phase2-container-lab/policies/10-kill-network-recon-binaries.yaml
-	kubectl apply -f phase2-container-lab/policies/20-kill-tcpdump.yaml
+	@echo "[INFO] Running: kubectl apply -f phase2-container-lab/policies/10-kill-network-recon-binaries.yaml"
+	@kubectl apply -f phase2-container-lab/policies/10-kill-network-recon-binaries.yaml
+	@echo "[INFO] Running: kubectl apply -f phase2-container-lab/policies/20-kill-tcpdump.yaml"
+	@kubectl apply -f phase2-container-lab/policies/20-kill-tcpdump.yaml
 
 .PHONY: unmitigate
 unmitigate: ## Drop the cluster-wide kill policies (REQUIRED before `make kubevirt`)
-	kubectl delete tracingpolicy kill-network-recon-binaries --ignore-not-found
-	kubectl delete tracingpolicy kill-tcpdump --ignore-not-found
+	@echo "[INFO] Running: kubectl delete tracingpolicy kill-network-recon-binaries"
+	@kubectl delete tracingpolicy kill-network-recon-binaries --ignore-not-found
+	@echo "[INFO] Running: kubectl delete tracingpolicy kill-tcpdump"
+	@kubectl delete tracingpolicy kill-tcpdump --ignore-not-found
 
 .PHONY: kubevirt
 kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
-	./scripts/40-install-kubevirt.sh
+	@echo "[INFO] Running: scripts/40-install-kubevirt.sh (KubeVirt $(KUBEVIRT_VERSION))"
+	@./scripts/40-install-kubevirt.sh
 	@# The VM's cloud-config is ~4.5 KB and KubeVirt caps INLINE userData at
 	@# 2048 bytes, so it ships as a Secret built from the file on disk. Edit
 	@# cloud-init/nginx-vm-user-data.yaml, re-run this, and restart the VM.
-	kubectl create namespace kubevirt-demo --dry-run=client -o yaml | kubectl apply -f -
-	kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
+	@echo "[INFO] Running: kubectl create namespace kubevirt-demo (apply)"
+	@kubectl create namespace kubevirt-demo --dry-run=client -o yaml | kubectl apply -f -
+	@echo "[INFO] Running: kubectl create secret nginx-vm-cloudinit (apply, from cloud-init/nginx-vm-user-data.yaml)"
+	@kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
 	  --from-file=userdata=phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml \
 	  --dry-run=client -o yaml | kubectl apply -f -
-	kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml
-	kubectl apply -f phase3-kubevirt-lab/20-service.yaml
-	kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml
-	kubectl apply -f phase3-kubevirt-lab/40-tmp-client.yaml
+	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml"
+	@kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml
+	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/20-service.yaml"
+	@kubectl apply -f phase3-kubevirt-lab/20-service.yaml
+	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml"
+	@kubectl apply -f phase3-kubevirt-lab/30-gateway-httproute.yaml
+	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/40-tmp-client.yaml"
+	@kubectl apply -f phase3-kubevirt-lab/40-tmp-client.yaml
 	@echo ""
 	@echo "VM is booting -- cloud-init installs nginx, nmap, tcpdump and Tetragon."
 	@echo "Measured 20-100s to ready; allow minutes on a cold image pull."
 	@echo "Watch the boot:   virtctl console --timeout=5 nginx-vm -n kubevirt-demo   (Ctrl+] to detach)"
-	@echo "Ready when:       kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/guest-ready"
+	@echo "Ready when:       make kubevirt-ready"
+
+.PHONY: kubevirt-ready
+kubevirt-ready: ## Block until tmp-client is up and the guest's cloud-init has finished
+	@echo "[INFO] Running: kubectl -n kubevirt-demo wait --for=condition=ready pod/tmp-client --timeout=120s"
+	@kubectl -n kubevirt-demo wait --for=condition=ready pod/tmp-client --timeout=120s
+	@echo "[INFO] Running: kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/guest-ready (polling every 5s, up to 5min)"
+	@for i in $$(seq 1 60); do \
+	  if kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/guest-ready 2>/dev/null | grep -q ready; then \
+	    echo "[INFO] Guest ready after ~$$((i * 5))s."; exit 0; \
+	  fi; \
+	  sleep 5; \
+	done; \
+	echo "[WARN] Not ready after 5 min -- check: virtctl console nginx-vm -n kubevirt-demo"; exit 1
+
+.PHONY: kubevirt-test
+kubevirt-test: ## Check both access paths: Service (works) and Gateway (stays Pending -- expected)
+	@echo "[INFO] Running: kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/details"
+	@kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/details \
+	  || echo "  FAILED -- is the VM ready? (make kubevirt-ready)"
+	@echo ""
+	@echo "[INFO] Running: kubectl -n kubevirt-demo get gateway nginx-gw (Cilium has Gateway API off -- stays Pending)"
+	@kubectl -n kubevirt-demo get gateway nginx-gw
 
 # --- Rehearsal loop --------------------------------------------------------
 #
@@ -243,13 +310,17 @@ kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 
 .PHONY: lab-clean
 lab-clean: ## Remove Phase 2 from the cluster (policies + attacker/victim). Keeps Tetragon
-	-kubectl delete tracingpolicy kill-network-recon-binaries kill-tcpdump \
+	@echo "[INFO] Running: kubectl delete tracingpolicy kill-network-recon-binaries kill-tcpdump monitor-network-activity-outside-cluster-cidr-range"
+	-@kubectl delete tracingpolicy kill-network-recon-binaries kill-tcpdump \
 	  monitor-network-activity-outside-cluster-cidr-range --ignore-not-found
-	-kubectl delete tracingpolicynamespaced kill-network-recon-binaries \
+	@echo "[INFO] Running: kubectl delete tracingpolicynamespaced kill-network-recon-binaries -n tetragon-demo"
+	-@kubectl delete tracingpolicynamespaced kill-network-recon-binaries \
 	  -n tetragon-demo --ignore-not-found 2>/dev/null
-	-kubectl delete -f phase2-container-lab/attack/netshoot.yaml --ignore-not-found
+	@echo "[INFO] Running: kubectl delete -f phase2-container-lab/attack/netshoot.yaml"
+	-@kubectl delete -f phase2-container-lab/attack/netshoot.yaml --ignore-not-found
 	@# The namespace must be fully gone before `make lab` recreates it, or the
 	@# apply races the terminating namespace and the pods never schedule.
+	@echo "[INFO] Running: kubectl wait --for=delete namespace/tetragon-demo --timeout=180s"
 	@kubectl wait --for=delete namespace/tetragon-demo --timeout=180s 2>/dev/null || true
 	@echo "[INFO] Phase 2 removed. Tetragon is still installed."
 
@@ -260,14 +331,22 @@ lab-reset: lab-clean lab ## Tear Phase 2 down and bring it back (repeatable rehe
 
 .PHONY: lab-purge
 lab-purge: lab-clean ## Also uninstall Tetragon itself (full Phase 2 removal)
-	-helm -n kube-system uninstall tetragon
+	@echo "[INFO] Running: helm -n kube-system uninstall tetragon"
+	-@helm -n kube-system uninstall tetragon
 	@echo "[INFO] Tetragon uninstalled. 'make lab' reinstalls it."
 
 .PHONY: kubevirt-clean
 kubevirt-clean: ## Remove Phase 3 objects (VM, Service, Gateway, client, policies)
-	-kubectl delete namespace kubevirt-demo --ignore-not-found
+	@echo "[INFO] Running: kubectl delete namespace kubevirt-demo"
+	-@kubectl delete namespace kubevirt-demo --ignore-not-found
+	@echo "[INFO] Running: kubectl wait --for=delete namespace/kubevirt-demo --timeout=300s"
 	@kubectl wait --for=delete namespace/kubevirt-demo --timeout=300s 2>/dev/null || true
 	@echo "[INFO] Phase 3 removed. KubeVirt itself is still installed."
+
+.PHONY: kubevirt-reset
+kubevirt-reset: kubevirt-clean kubevirt ## Tear Phase 3 down and bring it back (repeatable rehearsal loop)
+	@echo ""
+	@echo "Fresh Phase 3. Next: make kubevirt-ready  →  make kubevirt-test"
 
 .PHONY: events
 events: ## Stream Tetragon events from the attacker's node (the 'terminal 2')
@@ -275,31 +354,41 @@ events: ## Stream Tetragon events from the attacker's node (the 'terminal 2')
 	@# on this cluster the control plane's -- while the attacker runs on the
 	@# worker, so the attacks never show up and the stream fills with unrelated
 	@# kube-system activity. Pick the pod on the attacker's node instead.
+	@echo "[INFO] Running: kubectl -n tetragon-demo get pod attacker -o jsonpath='{.spec.nodeName}'"
 	@node=$$(kubectl -n tetragon-demo get pod attacker -o jsonpath='{.spec.nodeName}' 2>/dev/null); \
 	if [ -z "$$node" ]; then echo "attacker pod not found -- run 'make lab' first"; exit 1; fi; \
+	echo "[INFO] Running: kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon --field-selector spec.nodeName=$$node"; \
 	pod=$$(kubectl -n kube-system get pods -l app.kubernetes.io/name=tetragon \
 	        --field-selector spec.nodeName=$$node -o jsonpath='{.items[0].metadata.name}'); \
-	echo "[INFO] streaming from $$pod on $$node"; \
+	echo "[INFO] Running: kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact --pod attacker"; \
 	kubectl -n kube-system exec $$pod -c tetragon -- tetra getevents -o compact --pod attacker
 
 .PHONY: events-all
 events-all: ## Stream Tetragon events from every node, unfiltered (noisy)
-	kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
+	@echo "[INFO] Running: kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact"
+	@kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compact
 
 .PHONY: status
 status: ## Where is everything?
+	@echo "[INFO] Running: cilium status --brief (via control plane)"
 	@$(ON_MASTER) "cilium status --brief" || true
+	@echo "[INFO] Running: kubectl get nodes -o wide"
 	@kubectl get nodes -o wide 2>/dev/null || true
+	@echo "[INFO] Running: kubectl get tracingpolicies"
 	@kubectl get tracingpolicies 2>/dev/null || true
+	@echo "[INFO] Running: kubectl -n kubevirt-demo get vmi"
 	@kubectl -n kubevirt-demo get vmi 2>/dev/null || true
 
 .PHONY: preflight
 preflight: ## Run the night-before checks
 	@echo "── Cilium ─────────────────────────────"
+	@echo "[INFO] Running: cilium status --wait (via control plane)"
 	@$(ON_MASTER) "cilium status --wait"
 	@echo "── Nodes ──────────────────────────────"
+	@echo "[INFO] Running: kubectl get nodes"
 	@kubectl get nodes
 	@echo "── Static kprobe symbols ──────────────"
+	@echo "[INFO] Running: ansible shell 'grep -wcE raw_sendmsg|packet_sendmsg /proc/kallsyms' (all hosts)"
 	@$(ANSIBLE) -i inventory/inventory.ini all -m shell \
 	  -e "ansible_user=ubuntu ansible_become=yes" \
 	  -a 'grep -wcE "raw_sendmsg|packet_sendmsg" /proc/kallsyms'
@@ -307,12 +396,14 @@ preflight: ## Run the night-before checks
 	@# The CRD has no status field: a policy can be "applied" and inert. The
 	@# agent log is the only place this shows up. Seen 2026-09-20 with
 	@# kprobe-multi on kernel 7.0.0-31-generic.
+	@echo "[INFO] Running: kubectl -n kube-system logs ds/tetragon -c tetragon --tail=300 | grep 'adding tracing policy failed'"
 	@if kubectl -n kube-system logs ds/tetragon -c tetragon --tail=300 2>/dev/null \
 	     | grep -q "adding tracing policy failed"; then \
 	  echo "  FAIL: a TracingPolicy did not load -- see:"; \
 	  echo "    kubectl -n kube-system logs ds/tetragon -c tetragon | grep 'adding tracing policy failed'"; \
 	else echo "  ok (no load failures in the recent agent log)"; fi
 	@echo "── Nested virt (Phase 3) ──────────────"
+	@echo "[INFO] Running: ansible shell 'grep -cE vmx|svm /proc/cpuinfo' (all hosts)"
 	@$(ANSIBLE) -i inventory/inventory.ini all -m shell \
 	  -e "ansible_user=ubuntu ansible_become=yes" \
 	  -a 'grep -cE "vmx|svm" /proc/cpuinfo'
@@ -333,23 +424,30 @@ down: ## Destroy everything -- add-ons, cluster, VMs (prompts once)
 	@# stop existing is optional, and it hangs if the API is already gone --
 	@# hence the `|| true`. The leftover state reconciles on the next apply:
 	@# refresh finds the releases missing and plans to recreate them.
-	-$(MAKE) destroy-components
-	$(MAKE) destroy-vms
+	@echo "[INFO] Running: make destroy-components"
+	-@$(MAKE) destroy-components
+	@echo "[INFO] Running: make destroy-vms"
+	@$(MAKE) destroy-vms
 	@echo "Lab destroyed."
 
 .PHONY: destroy-components
 destroy-components: ## terraform destroy the add-on stack only
-	$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform destroy -auto-approve -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
+	@echo "[INFO] Running: terraform destroy -auto-approve (components/, containerized via $(TF_IMG))"
+	@$(call tf,components,terraform init $(TF_INIT_ARGS) && terraform destroy -auto-approve -var=kube_config_path=/tmp/.kube/bsides-lab.conf)
 
 .PHONY: reset
 reset: ## DESTRUCTIVE: Kubespray reset.yml, wipes Kubernetes (for Phase 2 use lab-reset)
-	$(call kubespray,--extra-vars reset_confirmation=yes reset.yml)
+	@echo "[INFO] Running: Kubespray reset.yml -e reset_confirmation=yes (containerized via $(KUBESPRAY_IMG))"
+	@$(call kubespray,--extra-vars reset_confirmation=yes reset.yml)
 
 .PHONY: destroy-vms
 destroy-vms: ## terraform destroy the two VMs
-	$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform destroy -auto-approve)
+	@echo "[INFO] Running: terraform destroy -auto-approve (vms/, containerized via $(TF_IMG))"
+	@$(call tf,vms,terraform init $(TF_INIT_ARGS) && terraform destroy -auto-approve)
 
 .PHONY: clean
 clean: ## Remove local terraform caches and the lab kubeconfig
-	rm -rf vms/.terraform components/.terraform
-	rm -f $(HOME)/.kube/bsides-lab.conf
+	@echo "[INFO] Running: rm -rf vms/.terraform components/.terraform"
+	@rm -rf vms/.terraform components/.terraform
+	@echo "[INFO] Running: rm -f $(HOME)/.kube/bsides-lab.conf"
+	@rm -f $(HOME)/.kube/bsides-lab.conf
