@@ -259,12 +259,21 @@ kubevirt: unmitigate ## Phase 3 (DRAFT) -- KubeVirt, the VM, Gateway and client
 	@# The VM's cloud-config is ~4.5 KB and KubeVirt caps INLINE userData at
 	@# 2048 bytes, so it ships as a Secret built from the file on disk. Edit
 	@# cloud-init/nginx-vm-user-data.yaml, re-run this, and restart the VM.
+	@if [ -z "$(VM_CONSOLE_PASSWORD)" ]; then \
+	  echo "VM_CONSOLE_PASSWORD is not set -- export it first, e.g.:"; \
+	  echo "  export VM_CONSOLE_PASSWORD=<pick one>"; \
+	  echo "It's the ubuntu login for 'virtctl console nginx-vm', never committed to git."; \
+	  exit 1; \
+	fi
 	@echo "[INFO] Running: kubectl create namespace kubevirt-demo (apply)"
 	@kubectl create namespace kubevirt-demo --dry-run=client -o yaml | kubectl apply -f -
-	@echo "[INFO] Running: kubectl create secret nginx-vm-cloudinit (apply, from cloud-init/nginx-vm-user-data.yaml)"
-	@kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
-	  --from-file=userdata=phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml \
-	  --dry-run=client -o yaml | kubectl apply -f -
+	@echo "[INFO] Running: kubectl create secret nginx-vm-cloudinit (apply, rendered from cloud-init/nginx-vm-user-data.yaml)"
+	@tmpuserdata=$$(mktemp) && \
+	sed 's/__VM_CONSOLE_PASSWORD__/$(VM_CONSOLE_PASSWORD)/' phase3-kubevirt-lab/cloud-init/nginx-vm-user-data.yaml > "$$tmpuserdata" && \
+	kubectl -n kubevirt-demo create secret generic nginx-vm-cloudinit \
+	  --from-file=userdata="$$tmpuserdata" \
+	  --dry-run=client -o yaml | kubectl apply -f - ; \
+	rm -f "$$tmpuserdata"
 	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml"
 	@kubectl apply -f phase3-kubevirt-lab/10-nginx-vm.yaml
 	@echo "[INFO] Running: kubectl apply -f phase3-kubevirt-lab/20-service.yaml"

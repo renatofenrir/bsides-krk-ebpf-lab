@@ -26,6 +26,7 @@ Four building blocks are reused by most targets.
 | `TETRAGON_VERSION` | `1.4.0` | `tetragon` — **exported**, so the script sees it |
 | `KUBEVIRT_VERSION` | `v1.9.0` | `kubevirt` — **exported**; pins the version instead of following `stable.txt` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | `$(MINIO_ACCESS_TOKEN)` / `$(MINIO_SECRET_KEY)` | Terraform state backend |
+| `VM_CONSOLE_PASSWORD` | **none — required** | `kubevirt`; the `ubuntu` login for `virtctl console nginx-vm`, templated into the cloud-init Secret at apply time, never committed |
 
 Only the variables marked **exported** reach the shell scripts. Make does not
 put makefile variables into a recipe's environment on its own, so the two
@@ -223,9 +224,14 @@ make kubevirt-reset && make kubevirt-ready && make kubevirt-test
 ## Phase 3 🚧
 
 ### `make kubevirt`
-Depends on `unmitigate` (Phase 2's kill policy would SIGKILL Phase 3's curls), then:
+Requires `VM_CONSOLE_PASSWORD` exported — refuses to run otherwise. Depends on
+`unmitigate` (Phase 2's kill policy would SIGKILL Phase 3's curls), then:
 1. `./scripts/40-install-kubevirt.sh` at `KUBEVIRT_VERSION` (pinned `v1.9.0`, matching the `virtctl` on the master) — operator + CR, nested-virt check, waits up to 15 min for `Available`, installs `virtctl`.
-2. `kubectl apply -f` each of `10-nginx-vm.yaml`, `20-service.yaml`, `30-gateway-httproute.yaml`, `40-tmp-client.yaml`.
+2. Renders `cloud-init/nginx-vm-user-data.yaml`'s `__VM_CONSOLE_PASSWORD__`
+   placeholder with `sed` into a temp file, builds the `nginx-vm-cloudinit`
+   Secret from *that* (not the repo file directly), and deletes the temp file.
+   The committed cloud-init never contains a real password.
+3. `kubectl apply -f` each of `10-nginx-vm.yaml`, `20-service.yaml`, `30-gateway-httproute.yaml`, `40-tmp-client.yaml`.
 
 The VM then needs ~4 min for cloud-init. The L4/L7 policies are applied by hand during the demo. See `phase3-kubevirt-lab/README.md` — the Gateway half is currently inert because Cilium has Gateway API off.
 
@@ -301,3 +307,4 @@ Local only: `rm -rf vms/.terraform components/.terraform` and `rm -f ~/.kube/bsi
 | `cluster`, `scale`, `reset`, `deps` | docker, ansible, SSH to both nodes as `ubuntu` |
 | `cilium`, `untaint`, `status`, `preflight` | ansible + SSH to the master |
 | everything Phase 2 / Phase 3 | `KUBECONFIG` pointing at the lab, and a healthy cluster |
+| `kubevirt`, `kubevirt-reset` | the above, **and** `VM_CONSOLE_PASSWORD` exported |

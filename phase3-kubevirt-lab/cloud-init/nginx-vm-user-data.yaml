@@ -8,11 +8,25 @@ packages:
   # matchBinaries list covers both /usr/bin and /usr/sbin.
   - nmap
   - tcpdump
-# Lets the demo reach the guest without a console:
+# Lets the demo reach the guest over ssh, IF you have the matching private key:
 #   kubectl exec tmp-client -n kubevirt-demo -- ssh -i <key> ubuntu@<vm-pod-ip>
 # Public half only; the private key never lives in this repo.
 ssh_authorized_keys:
   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFt5ooY0LW7v3IPiedKozdBv/MHNjVzJgogyh9AkMFo8 bsides-vm-demo
+# PRIMARY way in: `virtctl console nginx-vm -n kubevirt-demo`, login ubuntu /
+# $VM_CONSOLE_PASSWORD. Needs no key file -- just the cluster access you
+# already have to run virtctl in the first place. sshd stays key-only
+# (ssh_pwauth: false); this password is for the local getty on the serial
+# console only.
+#
+# __VM_CONSOLE_PASSWORD__ is a template placeholder, substituted by `make
+# kubevirt` from the VM_CONSOLE_PASSWORD env var -- see Makefile. Never commit
+# a real password here; this file is checked into git.
+chpasswd:
+  list: |
+    ubuntu:__VM_CONSOLE_PASSWORD__
+  expire: false
+ssh_pwauth: false
 write_files:
   - path: /etc/nginx/sites-available/default
     content: |

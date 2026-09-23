@@ -528,10 +528,63 @@ unused — Cilium has Gateway API off, and the argument above does not need them
 ### 3.0 — Before you start
 
 ```bash
-make kubevirt        # KubeVirt v1.9.0 + cloud-init Secret + the VM + tmp-client
+export VM_CONSOLE_PASSWORD=<pick one>   # the ubuntu login for the VM's console -- never committed
+make kubevirt                           # KubeVirt v1.9.0 + cloud-init Secret + the VM + tmp-client
 ```
 
-Prerequisites, all confirmed here:
+`make kubevirt` refuses to run without `VM_CONSOLE_PASSWORD` set. It renders
+`cloud-init/nginx-vm-user-data.yaml`'s `__VM_CONSOLE_PASSWORD__` placeholder
+with that value before building the Secret — the committed file never
+contains a real password, same as this repo's Proxmox/MinIO credentials.
+Pick anything memorable; it only protects a lab VM's serial console.
+
+**Open three terminals before you go anywhere near the stage. This is the
+whole runbook's layout — every beat below just tells you which one to type
+in.**
+
+| Terminal | For | First command |
+|---|---|---|
+| **1** | Driving `make`/`kubectl` from your laptop | (whatever the beat says) |
+| **2** | The host's Tetragon event stream (beat 3 only) | `make events-vm` |
+| **3** | **Attached to the guest's console — log in once, leave it open** | `virtctl console nginx-vm -n kubevirt-demo` |
+
+**Terminal 3, once, at the start of Phase 3:**
+```bash
+virtctl console nginx-vm -n kubevirt-demo
+```
+Press Enter if nothing appears (the console is a live stream, not a replay —
+this is expected on an already-booted VM). Log in with `ubuntu` and whatever
+you exported as `VM_CONSOLE_PASSWORD`:
+
+```
+nginx-vm login: ubuntu
+Password: <your VM_CONSOLE_PASSWORD>
+```
+
+Leave this terminal attached and logged in for the rest of Phase 3 — beats 2,
+3 and 4 all just type a command directly at this same guest shell prompt. If
+you ever need to detach without killing the session, `Ctrl+]` does it; the
+guest's shell keeps running and `virtctl console nginx-vm -n kubevirt-demo`
+picks the same session back up.
+
+This needs **no private key on your laptop** — only the `kubectl`/`virtctl`
+access you already have to run the command at all. (There is a second way in
+over ssh, `kubectl -n kubevirt-demo exec tmp-client -- ssh ...`, documented in
+`phase3-kubevirt-lab/README.md`; it needs the matching private key, which is
+never committed to this repo, so treat it as a fallback, not the plan.)
+
+⚠️ **"Login incorrect" almost always means the running VM predates
+`VM_CONSOLE_PASSWORD`** — either it was booted before this was added, or with
+a different value than you're typing now. Rebuild it with the same variable
+exported and it picks up the current value:
+```bash
+export VM_CONSOLE_PASSWORD=<same or new value>
+make kubevirt-reset      # kubevirt-clean + kubevirt, re-renders the Secret
+make kubevirt-ready       # wait for it to come back
+```
+Then retry the `virtctl console` login above.
+
+Other prerequisites, all confirmed here:
 
 - **Nested virtualisation**: the worker's Ryzen 5 5600G reports `svm` on all 4
   CPUs, so the VM runs at full speed. `make preflight` checks this.
@@ -540,31 +593,7 @@ Prerequisites, all confirmed here:
   the demo below the kill policies come back on deliberately, at beat 2.
 - **Boot the VM well before you go on stage.** cloud-init installs nginx, nmap,
   tcpdump *and Tetragon in the guest*. It took ~20–100 s here; assume minutes.
-- **Reaching the guest without a console**, since `virtctl` may not be on your
-  laptop. Run this block **once**, in the terminal you'll present from — every
-  guest command in beats 2 and 4 below is built on it:
-  ```bash
-  export VMIP=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.interfaces[0].ipAddress}')
-  kubectl -n kubevirt-demo exec -i tmp-client -- sh -c 'cat > /tmp/vmkey && chmod 600 /tmp/vmkey' < /path/to/your/private/key
-  vm() { kubectl -n kubevirt-demo exec tmp-client -- ssh -i /tmp/vmkey -o StrictHostKeyChecking=no ubuntu@$VMIP "$* ; echo exit=\$?"; }
-  ```
-  `/path/to/your/private/key` is the **one** manual substitution in this whole
-  guide — the matching **public** key is baked into
-  `cloud-init/nginx-vm-user-data.yaml` (comment `bsides-vm-demo`), the private
-  half is deliberately never committed. Do this substitution and confirm the
-  key works **before** you're on stage, not during; if you don't have that
-  key, see the gotchas in §3.6 for how to swap in a new one.
-
-  `vm` wraps the ssh call and appends `; echo exit=$?` **inside** the remote
-  shell, so the exit code you see is always the guest process's real one —
-  never ssh's own `255` for "the guest process was killed", which is the trap
-  called out below. From here on, every VM command in this guide is just
-  `vm <command>`, e.g. `vm sudo tcpdump -i any -c 3`.
-
-**Watching the boot:** `virtctl console --timeout=5 nginx-vm -n kubevirt-demo`
-attaches and waits, so fire it *before* the VM starts and it catches the whole
-boot. `Ctrl+]` detaches. Attaching to an already-booted VM shows nothing until
-you press Enter — the console is a live stream, not a replay.
+  `make kubevirt-ready` blocks until it's actually done.
 
 **`kubectl get gateway` shows `nginx-gw` stuck `Pending` with no address.**
 That is expected and harmless: Gateway API is off in Cilium, so no controller
@@ -576,13 +605,11 @@ jsonpath='{.status.addresses[0].value}')` prints nothing, by design). Delete
 the Gateway before the talk if a stray listing would distract:
 `kubectl -n kubevirt-demo delete -f phase3-kubevirt-lab/30-gateway-httproute.yaml`
 
-**Waiting for the guest:** `make kubevirt-ready` polls `/guest-ready` from
-`tmp-client` instead of eyeballing the console.
-
 **Reading exit codes in this phase:** `137` = SIGKILL (the policy worked).
-`124` = your own `timeout` expired, i.e. **the process survived**. Over ssh you
-may see `255` (ssh cannot express a signal) or a bash `Killed` line instead —
-run the command as `...; echo exit=$?` inside the guest to see the real code.
+`124` = your own `timeout` expired, i.e. **the process survived**. Typing
+directly at the Terminal 3 console shell (as below) always shows the real exit
+code with a plain `echo exit=$?` — the ssh-specific `255`/`Killed` confusion
+only applies if you go the ssh-fallback route instead.
 
 ### 3.1 — Beat 1: a VM is just a workload
 
@@ -608,7 +635,7 @@ launcher pod.
 
 ### 3.2 — Beat 2: the attack that just died in a container
 
-Turn Phase 2's enforcement back on:
+**Terminal 1** — turn Phase 2's enforcement back on:
 
 ```bash
 make mitigate     # cluster-wide kill policies, as in Phase 2
@@ -617,7 +644,7 @@ make mitigate     # cluster-wide kill policies, as in Phase 2
 **Prove it's actually loaded before you run either attack.** `make mitigate`
 only *applies* the TracingPolicy objects — it does not confirm the kprobe is
 attached, and a policy can sit there "applied" but inert (see §3.6 and the
-`preflight` gotcha). Two checks, ~15 s apart:
+`preflight` gotcha). Two checks, ~15 s apart, still in **Terminal 1**:
 
 ```bash
 kubectl get tracingpolicy
@@ -630,22 +657,27 @@ kubectl -n kube-system logs ds/tetragon -c tetragon --tail=50 | grep -i tcpdump
 
 Now run the *same* attack in both places:
 
+**Terminal 1** — the pod, on the node the VM is running on:
 ```bash
-# 1. In a pod on the node the VM is running on -- proves the kill policy is live:
 kubectl -n tetragon-demo exec attacker -- tcpdump -i any -c 3; echo exit=$?
-# expect: kubectl itself prints "command terminated with exit code 137", exit=137
-# (same as §2.4 -- kubectl detects the signal and reports it directly, no wrapper needed)
-
-# 2. The identical attack, inside the VM (uses the `vm` helper from §3.0):
-vm sudo timeout 6 tcpdump -i any -c 3
-# expect: exit=124 (timeout fired -- tcpdump ran the full 6s and survived)
-# (a plain, un-timed tcpdump also survives; timeout just bounds it for the demo clock)
 ```
+Expect kubectl itself to print `command terminated with exit code 137`, then
+`exit=137` (same as §2.4 — kubectl detects the signal and reports it directly,
+no wrapper needed).
 
-| Where | Result |
-|---|---|
-| pod (`attacker`) | `exit=137` — killed |
-| VM (`nginx-vm`) | `exit=124` — survives |
+**Terminal 3** — the identical attack, typed directly at the guest's console
+(you're already logged in from §3.0):
+```
+sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
+```
+Expect `exit=124` (timeout fired — tcpdump ran the full 6 s and survived; a
+plain, un-timed `tcpdump` also survives, `timeout` just bounds it for the
+demo clock).
+
+| Where | Terminal | Result |
+|---|---|---|
+| pod (`attacker`) | 1 | `exit=137` — killed |
+| VM (`nginx-vm`) | 3 | `exit=124` — survives |
 
 Same binary, same policy, same node. Only the kernel differs.
 
@@ -659,16 +691,14 @@ make events-vm
 
 That resolves `nginx-vm`'s node, finds the Tetragon pod running there, and
 streams it — same pattern as Phase 2's `make events`, just keyed to the VM
-instead of the attacker pod. (Equivalent by hand:
-`VMNODE=$(kubectl -n kubevirt-demo get vmi nginx-vm -o jsonpath='{.status.nodeName}')`,
-then find the Tetragon pod with that `nodeName` and `exec ... tetra getevents -o compact`
-into it.)
+instead of the attacker pod.
 
-**Terminal 1** — with the stream running, trigger the attack inside the guest:
+**Terminal 3** — with the stream running, type the attack directly at the
+guest's console:
 
-```bash
-vm sudo tcpdump -i any -c 3
-vm sudo nmap -sT -p 22,80 localhost
+```
+sudo tcpdump -i any -c 3
+sudo nmap -sT -p 22,80 localhost
 ```
 
 Measured here: **zero** events for the guest's `tcpdump`/`nmap`, and zero from
@@ -677,23 +707,24 @@ the processes inside the guest — they never touch the host kernel. `Ctrl+C`
 stops the stream in Terminal 2 once you've made the point.
 
 > Careful when you demo this: if a pod runs the same attack in the same window,
-> its events *do* appear and look like guest events. Run the guest attack alone.
-> Also, a pod's `ssh ... tcpdump` command line shows the word "tcpdump" in the
-> host stream — that is the ssh process's argv, not the guest's process.
+> its events *do* appear and look like guest events. Run the guest attack alone
+> in Terminal 3, nothing else, while Terminal 2 is watching.
 
 ### 3.4 — Beat 4: move the sensor up
 
 Tetragon is already installed in the guest (cloud-init, same 1.4.0 as the
 cluster), running with **no policies loaded**. Drop in the *same* policy file
-Phase 2 uses (still using the `vm` helper from §3.0):
+Phase 2 uses — **Terminal 3**, same console session as beats 2 and 3:
 
-```bash
-vm sudo /usr/local/bin/load-policy.sh
-# expect: policy loaded and hook attached after ~4s
-
-vm sudo timeout 6 tcpdump -i any -c 3
-# expect: exit=137 -- now killed inside the guest too
 ```
+sudo /usr/local/bin/load-policy.sh
+```
+Expect: `policy loaded and hook attached after ~4s`.
+
+```
+sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
+```
+Expect: `exit=137` — now killed inside the guest too.
 
 That script copies `/root/policies/kill-tcpdump.yaml` into
 `/etc/tetragon/tetragon.tp.d/`, restarts the service, and **waits until the
@@ -702,10 +733,10 @@ still succeeds for a few seconds and the demo looks broken.
 
 Note `nmap` still runs in the guest: only the tcpdump policy was loaded there.
 
-```bash
-vm sudo nmap -sT -p 22,80 localhost
-# expect: exit=0 -- nmap was never targeted, so it's unaffected
 ```
+sudo nmap -sT -p 22,80 localhost; echo exit=$?
+```
+Expect: `exit=0` — nmap was never targeted, so it's unaffected.
 
 That is a useful detail if someone asks — the guest enforces exactly what you
 gave it, nothing more.
@@ -746,6 +777,13 @@ Close on the trade-off, not on the fix:
 - `make kubevirt` used to abort *after* installing KubeVirt but *before*
   applying the VM, because installing `virtctl` needs sudo. `SKIP_VIRTCTL=1`
   skips it, and a failure there no longer kills the run.
+- **The console password is never committed.** `cloud-init/nginx-vm-user-data.yaml`
+  has `ubuntu:__VM_CONSOLE_PASSWORD__`, a template placeholder; `make kubevirt`
+  substitutes it from the `VM_CONSOLE_PASSWORD` env var into a temp file before
+  building the Secret, and refuses to run if the variable is unset. "Login
+  incorrect" means the running VM was built with a different value (or before
+  this existed) — `make kubevirt-reset` with the variable exported fixes it.
+  `ssh_pwauth: false` keeps sshd key-only regardless.
 
 ### 3.7 — Reset between rehearsals
 
