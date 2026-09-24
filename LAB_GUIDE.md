@@ -306,6 +306,18 @@ inter-node traffic in Hubble. On a two-node cluster those two hostnames are the
 whole topology — if `make untaint` did not run, the victim sits `Pending` and
 this is where you find out.
 
+**`attacker` stuck `ImagePullBackOff` / `ErrImagePull` with a TLS handshake
+timeout to `registry-1.docker.io`.** Measured 2026-09-25. That's the node's
+network path to Docker Hub, not this repo — diagnose from the node itself:
+```bash
+ssh ubuntu@10.1.1.41 'curl -v --max-time 10 https://registry-1.docker.io/v2/ 2>&1 | tail -30'
+```
+If it's a real, sustained blackhole (not a one-off blip), `netshoot.yaml` now
+pins `imagePullPolicy: IfNotPresent` on both pods — once you get one
+successful pull cached on that node, every later `make lab-reset` reuses it
+and stops depending on Docker Hub at all. This only rescues *repeats*, not
+the very first pull, so get a working rehearsal in well before stage.
+
 ### 2.3 — Detection
 
 **Terminal 2** — leave this streaming for the whole demo:

@@ -22,6 +22,13 @@ spec:
   containers:
     - name: netshoot
       image: nicolaka/netshoot:latest
+      # Explicit, because Kubernetes defaults an implicit `:latest` tag to
+      # Always -- meaning every `make lab-reset` re-pulls from Docker Hub
+      # live, even when the exact image is already cached on this node from
+      # a previous pull. Measured 2026-09-25: a TLS handshake timeout to
+      # registry-1.docker.io took down a rehearsal for exactly this reason.
+      # Once cached, IfNotPresent means resets never touch the network again.
+      imagePullPolicy: IfNotPresent
       command: ["sleep", "infinity"]
       securityContext:
         capabilities:
@@ -48,6 +55,10 @@ spec:
   containers:
     - name: nginx
       image: nginx:1.27-alpine
+      # Explicit for the same reason as the attacker pod, though this one's
+      # already the default: a pinned (non-`:latest`) tag defaults to
+      # IfNotPresent anyway.
+      imagePullPolicy: IfNotPresent
       ports:
         - containerPort: 80
   nodeSelector:

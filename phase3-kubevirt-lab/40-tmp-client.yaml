@@ -16,4 +16,11 @@ spec:
   containers:
     - name: client
       image: nicolaka/netshoot:latest
+      # Explicit, because Kubernetes defaults an implicit `:latest` tag to
+      # Always -- meaning every `make kubevirt-reset` would re-pull from
+      # Docker Hub live, even with the image already cached from a previous
+      # pull. Same fix as phase2-container-lab/attack/netshoot.yaml, same
+      # reason (measured 2026-09-25: a TLS handshake timeout to Docker Hub
+      # took down a rehearsal).
+      imagePullPolicy: IfNotPresent
       command: ["sleep", "infinity"]

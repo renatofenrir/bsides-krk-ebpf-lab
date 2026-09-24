@@ -114,6 +114,13 @@ Full walkthrough with expected exit codes for both paths:
   guest over ssh in the same window: `ssh … tcpdump` shows the word "tcpdump"
   in the host stream as part of the *ssh process's* argv.)
 - **`spec.running` is deprecated** in favour of `runStrategy`; it still works.
+- **`tmp-client` used an implicit `Always` pull policy.** `nicolaka/netshoot:latest`
+  with no explicit `imagePullPolicy` defaults to `Always` on a `:latest` tag,
+  so every `make kubevirt-reset` re-pulled from Docker Hub live even with the
+  image already cached. Measured 2026-09-25 in Phase 2's identical setup: a
+  TLS handshake timeout to Docker Hub took down a rehearsal. Now pinned to
+  `IfNotPresent` — only rescues *repeats*, so get one working pull cached
+  before you rely on it.
 - **The guest's disk is small and fixed-size** (plain `containerDisk`, no
   CDI/DataVolume in this cluster — can't be enlarged from the VM spec).
   Measured 2026-09-24: leaving the downloaded Tetragon tarball and its
