@@ -738,12 +738,22 @@ sudo /usr/local/bin/load-policy.sh
 ```
 Expect: `policy loaded and hook attached after ~4s`.
 
+**Show the kill in the same event style as beat 2's `make events`.** The
+guest's own Tetragon can be queried locally with `tetra` — confirmed present
+here (`which tetra`) — no second terminal needed: background it in this same
+console session, run the attack, then print what it caught:
+
 ```
+sudo tetra getevents -o compact > /tmp/tetra-guest.log 2>&1 &
 sudo timeout 6 tcpdump -i any -c 3; echo exit=$?
+sudo pkill -f "tetra getevents"
+cat /tmp/tetra-guest.log
 ```
-Expect: `exit=137` — now killed inside the guest too. (`-c 3` is fine to keep
-here, unlike beat 2: the kill fires at `security_socket_create`, before any
-packet is ever captured, so there's no race for a count to win.)
+Expect `exit=137`, and the log's `tcpdump` line to end in `SIGKILL` — the
+*exact* event style Terminal 1 printed for the `attacker` pod in beat 2, just
+sourced from the guest's own sensor instead of `kubectl exec`. (`-c 3` is
+fine to keep here, unlike beat 2: the kill fires at `security_socket_create`,
+before any packet is ever captured, so there's no race for a count to win.)
 
 That script copies `/root/policies/kill-tcpdump.yaml` into
 `/etc/tetragon/tetragon.tp.d/`, restarts the service, and **waits until the
@@ -771,14 +781,19 @@ sudo /usr/local/bin/unload-policy.sh
 Expect: `policy removed, tetragon restarted clean after ~2s`.
 
 ```
+sudo tetra getevents -o compact > /tmp/tetra-guest.log 2>&1 &
 sudo timeout 6 tcpdump -i any; echo exit=$?
+sudo pkill -f "tetra getevents"
+cat /tmp/tetra-guest.log
 ```
-Expect: `exit=124` — survives again, same as beat 2 (no `-c 3` here for the
-same reason: nothing should end this run except the timeout).
+Expect `exit=124` — survives again, same as beat 2 (no `-c 3` here for the
+same reason: nothing should end this run except the timeout). The log's
+`tcpdump` line ends in a plain `0`, not `SIGKILL` — proof the sensor is
+watching and simply has nothing to enforce right now, not that it's dead.
 
-Toggle `unload-policy.sh` / `load-policy.sh` and re-run the `tcpdump` line as
-many times as makes the point — `exit=124` unloaded, `exit=137` loaded, no VM
-rebuild between cycles.
+Toggle `unload-policy.sh` / `load-policy.sh` and repeat the matching capture
+block as many times as makes the point — `SIGKILL` loaded, plain exit
+unloaded, no VM rebuild between cycles.
 
 ### 3.5 — Beat 5: the catch
 

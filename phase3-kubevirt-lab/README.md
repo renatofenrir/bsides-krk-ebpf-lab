@@ -46,7 +46,7 @@ cloud-init installs and stages, so nothing slow or network-dependent happens on 
 
 - **nginx** serving `/`, `/details`, `/secret` (kept from the old draft; only `/details` gets mentioned) and `/guest-ready`, the marker that says cloud-init finished.
 - **nmap and tcpdump** — the Phase 2 toolkit, at `/usr/bin`, so the *same* attacks run inside the guest.
-- **Tetragon 1.4.0**, same version as the cluster, as a systemd service, **with no policies loaded**. That is the "host sensor can't see in here" state the demo opens with.
+- **Tetragon 1.4.0**, same version as the cluster, as a systemd service, **with no policies loaded**. That is the "host sensor can't see in here" state the demo opens with. The standalone tarball's `install.sh` also drops the **`tetra` CLI** — confirmed present 2026-09-24 — so beat 4 can query the guest's own Tetragon locally (`sudo tetra getevents -o compact`) and show the identical `🚀 process`/`💥 exit ... SIGKILL` event style beat 2 showed from the host, just sourced from inside the guest. See `LAB_GUIDE.md` §3.4.
 - **`/etc/tetragon/tetragon.conf.d/disable-kprobe-multi`** — mandatory, see gotchas.
 - **`/root/policies/kill-tcpdump.yaml`** — the guest's copy of Phase 2's policy, staged but not loaded. Keep it in sync with `../phase2-container-lab/policies/20-kill-tcpdump.yaml`.
 - **`/usr/local/bin/load-policy.sh`** — beat 4: copies the policy into `/etc/tetragon/tetragon.tp.d/`, restarts Tetragon and **waits until the kprobe is attached** before returning.
