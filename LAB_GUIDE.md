@@ -760,6 +760,26 @@ Expect: `exit=0` — nmap was never targeted, so it's unaffected.
 That is a useful detail if someone asks — the guest enforces exactly what you
 gave it, nothing more.
 
+**Repeating this beat.** Standalone Tetragon only reads
+`/etc/tetragon/tetragon.tp.d/` at startup, so — same as loading it — removing
+the policy needs a restart too; there's no live unload in this mode. Still
+**Terminal 3**:
+
+```
+sudo /usr/local/bin/unload-policy.sh
+```
+Expect: `policy removed, tetragon restarted clean after ~2s`.
+
+```
+sudo timeout 6 tcpdump -i any; echo exit=$?
+```
+Expect: `exit=124` — survives again, same as beat 2 (no `-c 3` here for the
+same reason: nothing should end this run except the timeout).
+
+Toggle `unload-policy.sh` / `load-policy.sh` and re-run the `tcpdump` line as
+many times as makes the point — `exit=124` unloaded, `exit=137` loaded, no VM
+rebuild between cycles.
+
 ### 3.5 — Beat 5: the catch
 
 Close on the trade-off, not on the fix:

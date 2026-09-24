@@ -25,7 +25,7 @@ Every step here was run on this cluster. Full runbook with expected output:
 | File | Role |
 |---|---|
 | `10-nginx-vm.yaml` | namespace + `VirtualMachine nginx-vm`; cloud-init comes from a Secret |
-| `cloud-init/nginx-vm-user-data.yaml` | **the real cloud-config**: nginx, nmap, tcpdump, Tetragon in the guest, the staged policy, `load-policy.sh` |
+| `cloud-init/nginx-vm-user-data.yaml` | **the real cloud-config**: nginx, nmap, tcpdump, Tetragon in the guest, the staged policy, `load-policy.sh`/`unload-policy.sh` |
 | `20-service.yaml` | ClusterIP Service in front of the VM |
 | `40-tmp-client.yaml` | netshoot pod; the Service test target, and the jump host for the ssh fallback |
 | `30-gateway-httproute.yaml` | 🚧 **parked** — needs Gateway API, which Cilium has off |
@@ -50,6 +50,7 @@ cloud-init installs and stages, so nothing slow or network-dependent happens on 
 - **`/etc/tetragon/tetragon.conf.d/disable-kprobe-multi`** — mandatory, see gotchas.
 - **`/root/policies/kill-tcpdump.yaml`** — the guest's copy of Phase 2's policy, staged but not loaded. Keep it in sync with `../phase2-container-lab/policies/20-kill-tcpdump.yaml`.
 - **`/usr/local/bin/load-policy.sh`** — beat 4: copies the policy into `/etc/tetragon/tetragon.tp.d/`, restarts Tetragon and **waits until the kprobe is attached** before returning.
+- **`/usr/local/bin/unload-policy.sh`** — the encore: removes the policy and restarts Tetragon clean, so beat 4 can be repeated (load → killed, unload → survives) without a VM rebuild between cycles. Standalone Tetragon only reads its policy directory at startup, so unloading needs a restart too — no live unload in this mode.
 
 ## Reaching the guest
 

@@ -135,6 +135,30 @@ write_files:
         sleep 1
       done
       echo "timed out waiting for the hook; check: journalctl -u tetragon"; exit 1
+  # The encore: pull the policy back out so beat 4 can be repeated as many
+  # times as makes the point. Standalone Tetragon only reads
+  # tetragon.tp.d/ at startup -- same as load-policy.sh, removing a policy
+  # needs a restart too, there's no live unload in this mode.
+  - path: /usr/local/bin/unload-policy.sh
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      rm -f /etc/tetragon/tetragon.tp.d/kill-tcpdump.yaml
+      systemctl restart tetragon
+      for i in $(seq 1 30); do
+        if journalctl -u tetragon --since "-60s" --no-pager 2>/dev/null \
+             | grep -q "Failed to start tetragon"; then
+          echo "TETRAGON FAILED TO START -- check: journalctl -u tetragon"; exit 1
+        fi
+        if systemctl is-active --quiet tetragon; then
+          sleep 2
+          echo "policy removed, tetragon restarted clean after ${i}s"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "timed out waiting for tetragon to restart; check: journalctl -u tetragon"; exit 1
 runcmd:
   - [ bash, /usr/local/bin/render-details.sh ]
   - [ systemctl, restart, nginx ]
