@@ -1,14 +1,19 @@
-# PHASE 3 -- DRAFT / UNVALIDATED
+# PHASE 3 -- PARKED, UNVALIDATED. `make kubevirt` applies this file, but it
+# does nothing on this cluster and isn't part of the live talk -- see
+# LAB_GUIDE.md §3's "not part of the talk any more" note.
 #
-# Cilium Gateway API ingress for the VM. The Gateway gets a LoadBalancer IP
-# from the CiliumLoadBalancerIPPool created in scripts/25-cilium-lb-ipam.sh
-# (10.1.1.240-249) and Cilium's L2 announcement makes it ARP-reachable from
-# the room.
+# Cilium Gateway API ingress for the VM. Would get a LoadBalancer IP from the
+# CiliumLoadBalancerIPPool created in scripts/25-cilium-lb-ipam.sh
+# (10.1.1.240-249), ARP-reachable via Cilium's L2 announcement -- IF Cilium's
+# `gatewayAPI` flag were on, which it isn't (see the `crds` Makefile target's
+# comment for why: the operator crash-loops on this Cilium/CRD version combo).
+# `kubectl get gateway nginx-gw` stays `Pending` with no address forever;
+# confirmed empty as recently as 2026-09-23. Delete it before the talk if a
+# stray `Pending` listing would distract; nothing else uses it.
 #
 # NOTE FOR ANYONE COMPARING AGAINST THE ORIGINAL NOTES: the reference lab ran
 # on Kind and its gateway answered on 172.18.255.200. That address is a Docker
-# bridge IP and does not exist here. Read the real one out of the Gateway
-# status at run time -- LAB_GUIDE.md exports it as $GATEWAY.
+# bridge IP and does not exist here, and would not matter even if it did.
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
@@ -34,9 +39,11 @@ spec:
     - name: nginx-gw
   rules:
     # One prefix rule for everything. The access decision for /secret is NOT
-    # made here -- it is made by the CiliumNetworkPolicy in 50-cnp-l7.yaml.
-    # Doing it in the route would prove nothing about eBPF; the whole point is
-    # that the enforcement lives in the datapath, below the ingress layer.
+    # made here -- it would be made by the CiliumNetworkPolicy in
+    # 60-cnp-l7.yaml, if that policy were reachable (it needs this Gateway,
+    # which is parked -- see the file header above). Doing it in the route
+    # would prove nothing about eBPF anyway; the whole point is that the
+    # enforcement lives in the datapath, below the ingress layer.
     - matches:
         - path:
             type: PathPrefix

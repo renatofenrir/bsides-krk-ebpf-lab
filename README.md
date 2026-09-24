@@ -41,7 +41,7 @@ inventory/              Kubespray inventory + group-vars
 install-master-deps.yml puts helm/cilium/hubble/tetra/virtctl on the master
 scripts/                the bits the Makefile shells out to
 phase2-container-lab/   Tetragon policies + attacker workload
-phase3-kubevirt-lab/    DRAFT — KubeVirt VM, Gateway, L4/L7 policies
+phase3-kubevirt-lab/    KubeVirt VM + in-guest Tetragon (validated); Gateway/L4/L7 policies parked
 ```
 
 Every folder has its own README explaining what's in it and why:
@@ -50,7 +50,7 @@ Every folder has its own README explaining what's in it and why:
 |---|---|
 | Tetragon policies, in depth | [`phase2-container-lab/policies/`](phase2-container-lab/policies/README.md) |
 | Phase 2 overview / attack pods | [`phase2-container-lab/`](phase2-container-lab/README.md), [`attack/`](phase2-container-lab/attack/README.md) |
-| Phase 3 VM + L4/L7 network policies | [`phase3-kubevirt-lab/`](phase3-kubevirt-lab/README.md) |
+| Phase 3 VM + in-guest Tetragon (L4/L7 policies parked) | [`phase3-kubevirt-lab/`](phase3-kubevirt-lab/README.md) |
 | VMs, inventory, scripts | [`vms/`](vms/README.md), [`inventory/`](inventory/README.md), [`scripts/`](scripts/README.md) |
 | Add-ons and each module | [`components/`](components/README.md), [`components/modules/`](components/modules/README.md) |
 
@@ -92,12 +92,18 @@ descheduler, cert-manager and Traefik.
 ## Status of the material
 
 - ✅ **Battle-tested** — presented at the Heineken Kraków warm-up talk: the
-  Cilium flag set and the `kill-tcpdump` TracingPolicy.
+  Cilium flag set and the `kill-tcpdump` TracingPolicy. Also covers Phase 3's
+  KubeVirt VM + in-guest Tetragon demo: validated end to end 2026-09-21/22,
+  hardened (console access, disk-space fix, repeatable policy toggle)
+  2026-09-23/24 — see `LAB_GUIDE.md` §3.
 - ⚠️ **Reconstructed** — original YAML lost with the deleted cluster; rebuilt
   from described behaviour: `monitor-network-activity-outside-cluster-cidr-range`
   and `kill-network-recon-binaries`.
-- 🚧 **Draft** — everything under `phase3-kubevirt-lab/`. Never run. Rehearse
-  before showing.
+- 🚧 **Parked** — `phase3-kubevirt-lab/30-gateway-httproute.yaml` and
+  `60-cnp-l7.yaml`: written, not part of the talk, not validated (both
+  blocked on Cilium's Gateway API being off). `50-cnp-l4.yaml` is parked from
+  the talk too, but *was* separately validated standalone 2026-09-24 — see
+  its header comment.
 
 ## Dependencies
 
@@ -116,5 +122,6 @@ Nothing sensitive is committed. Export before running:
 ```bash
 export TF_VAR_pm_user='root@pam' TF_VAR_pm_password='...'
 export MINIO_ACCESS_TOKEN='...' MINIO_SECRET_KEY='...'   # Terraform backend
+export VM_CONSOLE_PASSWORD='...'                          # Phase 3: nginx-vm's console login
 cp vms/terraform.tfvars.example vms/terraform.tfvars      # then edit
 ```

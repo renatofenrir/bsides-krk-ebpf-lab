@@ -233,7 +233,7 @@ Requires `VM_CONSOLE_PASSWORD` exported — refuses to run otherwise. Depends on
    The committed cloud-init never contains a real password.
 3. `kubectl apply -f` each of `10-nginx-vm.yaml`, `20-service.yaml`, `30-gateway-httproute.yaml`, `40-tmp-client.yaml`.
 
-The VM then needs ~4 min for cloud-init. The L4/L7 policies are applied by hand during the demo. See `phase3-kubevirt-lab/README.md` — the Gateway half is currently inert because Cilium has Gateway API off.
+The VM then needs ~4 min for cloud-init. `50-cnp-l4.yaml`/`60-cnp-l7.yaml` are **not** applied here and not part of the live demo — see `phase3-kubevirt-lab/README.md`. The Gateway half is currently inert because Cilium has Gateway API off.
 
 ### `make kubevirt-ready`
 Blocks instead of guessing: `kubectl wait` for `tmp-client`, then polls

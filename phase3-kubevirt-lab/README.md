@@ -1,4 +1,4 @@
-# Phase 3 — KubeVirt ✅ *(validated 2026-09-21/22)*
+# Phase 3 — KubeVirt ✅ *(validated 2026-09-21/22, hardened 2026-09-23/24)*
 
 The closing argument of the talk:
 
@@ -28,8 +28,9 @@ Every step here was run on this cluster. Full runbook with expected output:
 | `cloud-init/nginx-vm-user-data.yaml` | **the real cloud-config**: nginx, nmap, tcpdump, Tetragon in the guest, the staged policy, `load-policy.sh`/`unload-policy.sh` |
 | `20-service.yaml` | ClusterIP Service in front of the VM |
 | `40-tmp-client.yaml` | netshoot pod; the Service test target, and the jump host for the ssh fallback |
-| `30-gateway-httproute.yaml` | 🚧 **parked** — needs Gateway API, which Cilium has off |
-| `50-cnp-l4.yaml`, `60-cnp-l7.yaml` | 🚧 **parked** — the old `/secret` demo, not part of the talk |
+| `30-gateway-httproute.yaml` | 🚧 **parked, unvalidated** — needs Gateway API, which Cilium has off |
+| `50-cnp-l4.yaml` | 🚧 **parked, but validated standalone 2026-09-24** — the old `/secret` demo's L4 step; not applied by `make kubevirt`, not part of the talk, confirmed working on its own (see below) |
+| `60-cnp-l7.yaml` | 🚧 **parked, unvalidated** — the L7 step; needs the Gateway to route through Envoy, so it's untestable while Gateway API is off |
 
 `make kubevirt` installs KubeVirt (pinned **v1.9.0**), creates the cloud-init
 Secret from the file above, and applies `10`, `20`, `30`, `40`. Applying `30`
@@ -123,9 +124,28 @@ Full walkthrough with expected exit codes for both paths:
   50 MB. See `LAB_GUIDE.md` §3.6 for the live recovery commands if it ever
   fills up anyway.
 
+## Bonus check: L4 network policy still applies (not part of the talk)
+
+Confirmed 2026-09-24, standalone, without touching anything above:
+
+```bash
+kubectl apply -f phase3-kubevirt-lab/50-cnp-l4.yaml
+kubectl -n kubevirt-demo exec tmp-client -- wget -qO- http://nginx/details   # still works -- explicitly allowed
+kubectl run cnp-test --rm -it --image=nicolaka/netshoot -n kubevirt-demo --restart=Never \
+  -- wget -qO- --timeout=3 http://nginx/details                             # times out -- not in the allow-list
+kubectl delete -f phase3-kubevirt-lab/50-cnp-l4.yaml                        # clean up -- back to exactly where you started
+```
+
+Confirms Cilium enforces `CiliumNetworkPolicy` on `nginx-vm`'s pod exactly
+like any other workload. Not added to the talk because the talk's argument
+is process-level enforcement following the VM, not network policy — this was
+just never in question and is here for your own Q&A backup. See
+`50-cnp-l4.yaml`'s header for the full reasoning, and `LAB_GUIDE.md` §3.6.
+
 ## Reset between rehearsals
 
 ```bash
+export VM_CONSOLE_PASSWORD=<same or new value>   # kubevirt refuses to run without it
 make kubevirt-reset    # kubevirt-clean + kubevirt in one shot
 make kubevirt-ready    # blocks until cloud-init is done
 make kubevirt-test     # Service works; Gateway stays Pending (expected)

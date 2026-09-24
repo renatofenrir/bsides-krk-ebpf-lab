@@ -1,12 +1,16 @@
 # ===========================================================================
-# PHASE 3 -- DRAFT / UNVALIDATED
+# PHASE 3 -- VALIDATED 2026-09-21/22, hardened 2026-09-23/24. Core of the
+# live talk -- see LAB_GUIDE.md §3.
 #
-# An Ubuntu VM running nginx, serving three paths that the CiliumNetworkPolicy
-# demos in 50-cnp-l7.yaml discriminate between:
+# An Ubuntu VM running nginx, serving three paths. Only `/details` is used in
+# the live talk (beat 1). `/` and `/secret` are leftovers from the original
+# reference lab's L4/L7 CiliumNetworkPolicy demo (60-cnp-l7.yaml), which is
+# parked (needs the Gateway, off in this cluster) and not part of the talk:
 #
-#   /          stock nginx welcome page   -> allowed
-#   /details   VM name, IP, locale        -> allowed
-#   /secret    the thing we lock down     -> 403 from Envoy
+#   /          stock nginx welcome page   -> always 200, nothing enforces on it
+#   /details   VM name, IP, locale        -> beat 1's target
+#   /secret    the flag                   -> always 200 too, UNLESS 60-cnp-l7.yaml
+#                                             is applied by hand (see its own header)
 #
 # The /details output is shaped to match the original reference lab, which
 # rendered: <h1>VMDetails</h1><p>Name: ...</p><p>IP: ...</p><p>Locale: ...</p>

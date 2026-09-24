@@ -1,4 +1,10 @@
-# PHASE 3 -- DRAFT / UNVALIDATED
+# PHASE 3 -- PARKED, UNVALIDATED. Not applied by `make kubevirt`, not part of
+# the live talk. Unlike 50-cnp-l4.yaml, this one genuinely can't be tested on
+# this cluster: the L7 HTTP-path enforcement below only takes effect on
+# traffic that passes through the Gateway's Envoy, and the Gateway is
+# permanently `Pending` here (Cilium has Gateway API off -- see
+# 30-gateway-httproute.yaml's header). Kept for reference / in case Gateway
+# API ever comes back.
 #
 # STEP TWO: the same policy, now HTTP-aware. / and /details are allowed;
 # /secret is not, and the request never reaches nginx.

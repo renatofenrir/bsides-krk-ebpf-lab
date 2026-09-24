@@ -1,12 +1,23 @@
-# PHASE 3 -- DRAFT / UNVALIDATED
+# PHASE 3 -- VALIDATED STANDALONE (2026-09-24), NOT PART OF THE LIVE TALK
 #
 # STEP ONE of the lockdown: plain L4. Only tmp-client and the Gateway may
 # reach the VM, and only on TCP/80. Everything else is dropped.
 #
-# Demo beat: this is the policy an ordinary Kubernetes shop would write. It is
-# correct and it is not enough -- it cannot tell GET /details from GET /secret,
-# because at L4 both are "TCP to port 80". That gap is what 50-cnp-l7.yaml
-# closes, and it is the argument for L7-aware enforcement.
+# Confirmed on this cluster 2026-09-24: applied cleanly (kubectl get
+# ciliumnetworkpolicy shows VALID=True), tmp-client stayed allowed
+# (wget .../details succeeded), and an unlabeled throwaway pod's request to
+# the same Service timed out. Proves Cilium enforces L4 policy on a KubeVirt
+# workload's pod exactly like any other -- but it's still not applied by
+# `make kubevirt` and still not part of the talk, because the talk's
+# argument (LAB_GUIDE.md §3) is about process-level enforcement following the
+# VM boundary, not network policy, which was never in question. Apply/delete
+# this by hand if you want to re-run the check; see phase3-kubevirt-lab/README.md.
+#
+# Would-be demo beat, if L7 ever comes back: this is the policy an ordinary
+# Kubernetes shop would write. It is correct and it is not enough -- it
+# cannot tell GET /details from GET /secret, because at L4 both are "TCP to
+# port 80". That gap is what 60-cnp-l7.yaml closes -- but that one needs the
+# Gateway, which is off, so it stays untested.
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:

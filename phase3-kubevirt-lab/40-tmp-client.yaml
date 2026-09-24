@@ -1,7 +1,10 @@
-# PHASE 3 -- DRAFT / UNVALIDATED
+# PHASE 3 -- VALIDATED 2026-09-21/22. Core of the live talk -- see
+# LAB_GUIDE.md §3.
 #
-# The in-cluster client used to prove the policies from inside the mesh, as
-# opposed to the laptop hitting the Gateway from outside.
+# The in-cluster client for beat 1's Service check (LAB_GUIDE.md §3.1) and,
+# optionally, as the ssh jump host to the guest if you have the matching
+# private key (§3.0's fallback path -- the primary path is `virtctl console`,
+# which needs no jump host at all).
 apiVersion: v1
 kind: Pod
 metadata:

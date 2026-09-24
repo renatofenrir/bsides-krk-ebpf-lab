@@ -14,10 +14,15 @@ things on stage, so they are worth internalising before you rehearse.
 |---|---|---|
 | ✅ **BATTLE-TESTED** | Presented at the Heineken Kraków warm-up talk and known to work | `kill-tcpdump` policy, Cilium flag set |
 | ⚠️ **RECONSTRUCTED** | Original YAML was lost with the deleted cluster; rebuilt from described behaviour. Behaviour should match, byte-for-byte equivalence is not claimed | `monitor-outside-cluster-cidr`, `kill-network-recon-binaries` |
-| 🚧 **PARKED** | Written, not part of the talk, not validated | `30-gateway-httproute.yaml`, `50-cnp-l4.yaml`, `60-cnp-l7.yaml` (Gateway API is off in Cilium) |
+| 🚧 **PARKED** | Written, not part of the talk | `30-gateway-httproute.yaml`, `50-cnp-l4.yaml`, `60-cnp-l7.yaml` — none applied by `make kubevirt`, none part of the demo beats |
 
 Phase 3's demo path — VM, in-guest Tetragon, the kill — was run end to end on
-this cluster on 2026-09-21/22 and is ✅.
+this cluster on 2026-09-21/22, then hardened (console access, disk-space fix,
+repeatable policy toggle) on 2026-09-23/24, and is ✅. Of the parked files,
+`30-` and `60-` are also **unvalidated** (both blocked on Gateway API being
+off); `50-cnp-l4.yaml` was separately confirmed working standalone on
+2026-09-24 — parked from the talk, not untested. See its own header comment
+and `phase3-kubevirt-lab/README.md`.
 
 **The single most important thing in this document:** the CIDRs, LB range and
 gateway IPs in the original notes came from a **Kind** cluster
@@ -514,7 +519,7 @@ two systems correlated after the fact.
 
 ---
 
-## Phase 3 — KubeVirt ✅ *(validated 2026-09-21/22 on this cluster)*
+## Phase 3 — KubeVirt ✅ *(validated 2026-09-21/22, hardened 2026-09-23/24)*
 
 **The argument:** network policy follows the workload into a VM; process-level
 enforcement does not. Same attack, same policy, different kernel — so you move
@@ -523,7 +528,10 @@ the sensor up into the guest.
 Every step below was run end to end on this cluster. What is **not** part of
 the talk any more: the Gateway, the HTTPRoute and the L4/L7
 CiliumNetworkPolicies (`30-`, `50-`, `60-`). Those files stay in the repo,
-unused — Cilium has Gateway API off, and the argument above does not need them.
+unused — Cilium has Gateway API off, and the argument above does not need
+them. (`50-cnp-l4.yaml` specifically was separately confirmed to still work
+standalone on 2026-09-24 — see §3.6 — it's excluded from the talk on
+narrative grounds, not because it's broken.)
 
 ### 3.0 — Before you start
 
@@ -869,10 +877,22 @@ Close on the trade-off, not on the fix:
   sudo journalctl --vacuum-size=20M
   df -h /
   ```
+- **`50-cnp-l4.yaml` (parked, not applied by `make kubevirt`) was separately
+  confirmed working, standalone, on 2026-09-24.** Applied by hand
+  (`kubectl apply -f phase3-kubevirt-lab/50-cnp-l4.yaml`), it enforced
+  correctly: `tmp-client` (explicitly allowed) still reached the VM, and a
+  throwaway unlabeled pod (`kubectl run cnp-test --rm -it --image=nicolaka/netshoot
+  -n kubevirt-demo --restart=Never -- wget -qO- --timeout=3 http://nginx/details`)
+  timed out. Confirms Cilium enforces L4 `CiliumNetworkPolicy` on a KubeVirt
+  workload's pod exactly like any other — it's excluded from the talk on
+  narrative grounds (the argument here is process-level, not network
+  policy), not because it doesn't work. Clean up after re-testing:
+  `kubectl delete -f phase3-kubevirt-lab/50-cnp-l4.yaml`.
 
 ### 3.7 — Reset between rehearsals
 
 ```bash
+export VM_CONSOLE_PASSWORD=<same or new value>   # kubevirt refuses to run without it
 make kubevirt-reset     # kubevirt-clean + kubevirt in one shot
 make kubevirt-ready     # blocks until cloud-init is done
 make kubevirt-test      # Service works; Gateway stays Pending (expected)
@@ -920,9 +940,6 @@ for `l2announcements`. Check for client-side throttling in the agent logs.
 **Everything in Phase 3 dies with exit 137.** You left Phase 2's cluster-wide
 curl-kill policy applied. See §3.0.
 
-**`/secret` is allowed despite the L7 policy.** Unanchored path regex. Must be
-`^/secret$`-style anchoring — see §3.5.
-
 **Working over Twingate from the venue.** Three known failure modes on this
 setup, each with a different cause:
 
@@ -949,4 +966,4 @@ setup, each with a different cause:
 | LB mechanism | Kind + MetalLB | Cilium `l2announcements` (no MetalLB) |
 | Cilium install | `cilium install --set ...` | same, plus `k8sServiceHost` and `k8sClientRateLimit` |
 | TracingPolicies | 3, all validated | 1 verbatim, 2 reconstructed — **all three run on this cluster 2026-09-20/22** |
-| VM section | none | Phase 3: VM + in-guest Tetragon, validated 2026-09-21/22 |
+| VM section | none | Phase 3: VM + in-guest Tetragon, validated 2026-09-21/22, hardened 2026-09-23/24 |
