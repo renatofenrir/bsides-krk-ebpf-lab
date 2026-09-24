@@ -28,6 +28,19 @@ chpasswd:
   expire: false
 ssh_pwauth: false
 write_files:
+  # Disk is tight on this containerDisk-backed VM (no CDI/DataVolume in this
+  # cluster, so its root size isn't adjustable from the VM spec) -- trim what
+  # apt pulls in so there's headroom for Tetragon's own footprint below.
+  - path: /etc/apt/apt.conf.d/99-no-recommends
+    content: |
+      APT::Install-Recommends "false";
+      APT::Install-Suggests "false";
+  # Same reasoning: a long rehearsal day with Tetragon logging kprobe hits
+  # shouldn't be able to fill the disk with journal entries.
+  - path: /etc/systemd/journald.conf.d/size-cap.conf
+    content: |
+      [Journal]
+      SystemMaxUse=50M
   - path: /etc/nginx/sites-available/default
     content: |
       server {
@@ -139,6 +152,12 @@ runcmd:
   - bash -c 'curl -sL --fail -o /tmp/tetragon.tgz https://github.com/cilium/tetragon/releases/download/v1.4.0/tetragon-v1.4.0-amd64.tar.gz'
   - bash -c 'tar xf /tmp/tetragon.tgz -C /tmp'
   - bash -c 'cd /tmp/tetragon-v1.4.0-amd64 && ./install.sh'
+  # The downloaded tarball and its extracted tree serve no purpose once
+  # install.sh has copied the binaries into place -- on this VM's small,
+  # fixed-size disk, leaving them behind was directly responsible for a
+  # "No space left on device" failure measured on 2026-09-24, on the very
+  # next write (a few KB, at beat 4's load-policy.sh). Never skip this.
+  - bash -c 'rm -rf /tmp/tetragon.tgz /tmp/tetragon-v1.4.0-amd64'
   # Same kprobe-multi problem as the cluster's Tetragon, and it bites here too:
   # without this the daemon dies with "Failed to start tetragon ...
   # bpf_multi_kprobe_v61.o ... load program: invalid argument" the moment a
@@ -150,6 +169,9 @@ runcmd:
   - bash -c 'mkdir -p /etc/tetragon/tetragon.conf.d && echo true > /etc/tetragon/tetragon.conf.d/disable-kprobe-multi'
   - [ systemctl, enable, tetragon ]
   - bash -c 'systemctl is-active tetragon || systemctl start tetragon'
+  # Cached .deb archives from package_update/packages above serve no purpose
+  # after install -- same disk-pressure reasoning as the Tetragon cleanup.
+  - bash -c 'apt-get clean'
   # Marker the validation script polls for, so "is the guest
   # ready?" is one HTTP GET instead of guesswork.
   - bash -c 'echo ready > /var/www/html/guest-ready'

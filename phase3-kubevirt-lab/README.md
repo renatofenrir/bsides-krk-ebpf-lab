@@ -112,6 +112,15 @@ Full walkthrough with expected exit codes for both paths:
   guest over ssh in the same window: `ssh … tcpdump` shows the word "tcpdump"
   in the host stream as part of the *ssh process's* argv.)
 - **`spec.running` is deprecated** in favour of `runStrategy`; it still works.
+- **The guest's disk is small and fixed-size** (plain `containerDisk`, no
+  CDI/DataVolume in this cluster — can't be enlarged from the VM spec).
+  Measured 2026-09-24: leaving the downloaded Tetragon tarball and its
+  extracted tree on disk after `install.sh` copied the binaries out was
+  enough to hit `No space left on device` on the very next write. cloud-init
+  now deletes both right after install, disables apt recommends before
+  `nginx`/`nmap`/`tcpdump`, runs `apt-get clean`, and caps the journal at
+  50 MB. See `LAB_GUIDE.md` §3.6 for the live recovery commands if it ever
+  fills up anyway.
 
 ## Reset between rehearsals
 

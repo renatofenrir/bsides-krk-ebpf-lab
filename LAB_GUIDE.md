@@ -802,6 +802,7 @@ Close on the trade-off, not on the fix:
   building the Secret, and refuses to run if the variable is unset. "Login
   incorrect" means the running VM was built with a different value (or before
   this existed) — `make kubevirt-reset` with the variable exported fixes it.
+  `ssh_pwauth: false` keeps sshd key-only regardless.
 - **Beat 2's guest `tcpdump` raced its own `-c 3` against `timeout 6`.**
   Measured 2026-09-23: the guest's ambient ARP/DNS traffic delivered 3 packets
   in well under 6 s, so `tcpdump` hit its count and exited **0** on its own —
@@ -810,7 +811,29 @@ Close on the trade-off, not on the fix:
   from that one command so `timeout` is unconditionally what ends it. Beat 4's
   `-c 3` doesn't have this problem — the kill there fires at
   `security_socket_create`, before any packet exists to count.
-  `ssh_pwauth: false` keeps sshd key-only regardless.
+- **The guest ran out of disk mid-rehearsal (`No space left on device`),
+  measured 2026-09-24, on a plain `cp` of a ~1 KB policy file at beat 4.**
+  This VM's root disk is a plain `containerDisk` (no CDI/DataVolume in this
+  cluster), so its size is fixed by the base image and **can't be bumped from
+  the VM spec** — the fix is to stop wasting what it has. cloud-init now: (1)
+  deletes the Tetragon tarball and its extracted tree right after
+  `install.sh` copies the binaries into place — leaving both behind was
+  duplicating that footprint for no reason; (2) sets
+  `APT::Install-Recommends "false"` before `nginx`/`nmap`/`tcpdump` install;
+  (3) runs `apt-get clean` at the end of `runcmd`; (4) caps the guest's
+  journal at 50 MB so a long rehearsal day can't slowly fill the disk with
+  logs. Needs the standard rebuild-Secret-and-restart-VM cycle to take effect
+  on an already-running VM, same as any other cloud-init edit.
+
+  **If it fills up again anyway**, at the console:
+  ```bash
+  df -h /
+  sudo du -sh /var/cache/apt/archives /tmp/* 2>/dev/null
+  sudo rm -rf /tmp/tetragon.tgz /tmp/tetragon-v1.4.0-amd64  # if still there
+  sudo apt-get clean
+  sudo journalctl --vacuum-size=20M
+  df -h /
+  ```
 
 ### 3.7 — Reset between rehearsals
 
