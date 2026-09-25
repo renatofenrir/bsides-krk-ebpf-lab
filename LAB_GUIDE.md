@@ -318,6 +318,19 @@ successful pull cached on that node, every later `make lab-reset` reuses it
 and stops depending on Docker Hub at all. This only rescues *repeats*, not
 the very first pull, so get a working rehearsal in well before stage.
 
+**One-time migration snag from that same fix, measured 2026-09-25:** if
+`attacker` was already running from *before* `imagePullPolicy` was pinned,
+`make lab` fails with `Forbidden: pod updates may not change fields other
+than ...` — `imagePullPolicy` isn't one of the handful of fields Kubernetes
+allows patching on a live Pod, so the already-running pod can't pick up the
+new value in place. One-time fix, then it's gone for good:
+```bash
+kubectl delete pod attacker -n tetragon-demo
+make lab
+```
+`victim` never hits this: its pinned (non-`:latest`) tag already defaulted to
+`IfNotPresent` before the fix, so there was no actual field change to reject.
+
 ### 2.3 — Detection
 
 **Terminal 2** — leave this streaming for the whole demo:
