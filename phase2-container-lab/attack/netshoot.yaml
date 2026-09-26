@@ -42,6 +42,16 @@ spec:
   # On a two-node cluster these two hostnames are the whole topology.
   nodeSelector:
     kubernetes.io/hostname: k8s-worker-0-bsides-krk-demo
+  # Ride out a brief node blip instead of being evicted. This is a bare Pod
+  # (no controller), so the default 300s not-ready/unreachable eviction deletes
+  # it for good and every `kubectl exec` attack silently breaks mid-talk --
+  # which is what happened on 2026-09-26 when worker-0 lost its kubelet
+  # heartbeat for ~11 min (a fabric hiccup, not resource pressure: the node was
+  # at 1% CPU / 22% RAM). 30 min outlasts a 45-min slot's worst transient.
+  # Specifying these keys suppresses Kubernetes' default 300s tolerations.
+  tolerations:
+    - {key: node.kubernetes.io/not-ready,   operator: Exists, effect: NoExecute, tolerationSeconds: 1800}
+    - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 1800}
 ---
 # A harmless in-cluster target for the "allowed traffic still works" beat.
 apiVersion: v1
@@ -63,6 +73,12 @@ spec:
         - containerPort: 80
   nodeSelector:
     kubernetes.io/hostname: k8s-master-0-bsides-krk-demo
+  # Same reasoning as the attacker pod: keep the demo target alive through a
+  # brief control-plane blip rather than losing the "allowed traffic still
+  # works" beat to a 300s eviction.
+  tolerations:
+    - {key: node.kubernetes.io/not-ready,   operator: Exists, effect: NoExecute, tolerationSeconds: 1800}
+    - {key: node.kubernetes.io/unreachable, operator: Exists, effect: NoExecute, tolerationSeconds: 1800}
 ---
 apiVersion: v1
 kind: Service
